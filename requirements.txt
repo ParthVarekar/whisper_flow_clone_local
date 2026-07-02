@@ -1,0 +1,9 @@
+# whisper-flow has NO runtime pip dependencies (Python 3.8+ stdlib only).
+# This file exists to document that explicitly and to declare test/lint tools
+# for developers who want them.
+
+# (none required at runtime)
+
+# Optional developer tooling (not required to run whisper-flow):
+# pytest>=7.0
+# ruff>=0.4

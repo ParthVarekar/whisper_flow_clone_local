@@ -1,0 +1,27 @@
+# build artifacts
+build/
+third_party/
+models/
+*.bin
+*.gguf
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+
+# local config / outputs
+config.json
+*.srt
+*.vtt
+# keep generated transcripts out of git but allow the demo README
+demo/*.wav
+demo/*.mp3
+demo/*.m4a
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,45 @@
+{
+  "transcription": {
+    "whisper_bin": "whisper-cli",
+    "model": "models/ggml-base.en.bin",
+    "language": "auto",
+    "translate": false,
+    "threads": 4,
+    "gpu": "auto",
+    "flash_attention": true,
+    "max_len": 0,
+    "vad": false,
+    "vad_model": ""
+  },
+  "llm": {
+    "mode": "server",
+    "llama_server_bin": "llama-server",
+    "llama_cli_bin": "llama-cli",
+    "model": "models/gemma-3-1b-it-Q4_K_M.gguf",
+    "mmproj": "",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "temperature": 0.3,
+    "max_tokens": 512,
+    "top_p": 0.9,
+    "n_ctx": 2048,
+    "threads": 4,
+    "gpu_layers": 0
+  },
+  "audio": {
+    "ffmpeg_bin": "ffmpeg",
+    "arecord_bin": "arecord",
+    "sample_rate": 16000,
+    "channels": 1,
+    "mic_device": "default",
+    "mic_backend": "auto",
+    "chunk_seconds": 0
+  },
+  "output": {
+    "format": "text",
+    "write_files": false,
+    "out_dir": ""
+  },
+  "mode": "summarize",
+  "verbose": false
+}

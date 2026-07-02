@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "whisper-flow"
+version = "0.2.0"
+description = "Local-only speech-to-text + LLM pipeline (whisper.cpp + llama.cpp)"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [{ name = "whisper-flow contributors" }]
+keywords = ["whisper", "stt", "llama", "llm", "transcription", "voice", "local", "offline"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Environment :: Console",
+  "Environment :: X11 Applications",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+[project.scripts]
+whisper-flow = "whisper_flow.cli:main"
+
+[project.optional-dependencies]
+# Optional: cross-platform mic capture via PortAudio (single codepath, default device auto).
+mic = ["sounddevice"]
+# Optional: TOML config support on Python 3.8-3.10 (3.11+ has stdlib tomllib).
+toml = ["tomli; python_version < '3.11'"]
+# Optional: better memory reporting in benchmarks.
+bench = ["psutil; os_name != 'nt' or sys_platform != 'win32'"]
+# Dev tooling.
+dev = ["build", "pytest>=7.0", "ruff", "pyinstaller"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["whisper_flow"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "whisper_flow",
+  "tests",
+  "scripts",
+  "README.md",
+  "ARCHITECTURE.md",
+  "RESEARCH.md",
+  "GAP_ANALYSIS.md",
+  "config.example.json",
+  "config.example.toml",
+  "Dockerfile",
+  "pyinstaller.spec",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501", "E402", "B008", "UP022", "UP045"]

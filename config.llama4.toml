@@ -1,0 +1,32 @@
+# Local llama.cpp setup for Whisperflow.
+# Start the server with:
+# D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+
+mode = "summarize"
+verbose = true
+
+[transcription]
+whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
+model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
+language = "en"
+threads = 8
+flash_attention = false
+
+[audio]
+mic_backend = "sounddevice"
+mic_device = "default"
+stream = true
+stream_chunk_s = 2
+stream_max_s = 30
+
+[llm]
+mode = "server"
+llama_server_bin = 'D:\llama4\llama-server.exe'
+llama_cli_bin = 'D:\llama4\llama-cli.exe'
+model = 'C:\Users\Parth\.cache\huggingface\hub\models--unsloth--gemma-4-E4B-it-GGUF\snapshots\e1d90e5fb9f61d8dc71ef016580784a054e5c787\gemma-4-E4B-it-UD-Q4_K_XL.gguf'
+host = "127.0.0.1"
+port = 8081
+n_ctx = 32768
+temperature = 0.3
+max_tokens = 512
+top_p = 0.9
