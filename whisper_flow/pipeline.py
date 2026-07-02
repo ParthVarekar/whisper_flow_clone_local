@@ -227,31 +227,32 @@ class Pipeline:
 
     # -- transcription only --------------------------------------------------
 
-    def transcribe_file(self, path: str) -> TranscriptionResult:
+    def transcribe_file(self, path: str, *, initial_prompt: str = "") -> TranscriptionResult:
         """Normalize + (optionally) chunk + transcribe a file. Merges chunk segments."""
-        from .audio import validate_wav  # local import to avoid cycle at module load
-        self.notifier.stage("Normalizing audio", os.path.basename(path))
         if self.benchmark:
-            self.benchmark.start("preprocess")
-        norm = normalize_file(self.cfg.audio, path, verbose=self.cfg.verbose)
-        # validate the normalized WAV before handing to whisper-cli (robustness)
-        audio_dur = validate_wav(norm)
+            self.benchmark.start("audio_load")
+        normalized, audio_dur = normalize_file(self.cfg.audio, path, verbose=self.cfg.verbose)
         if self.benchmark:
-            self.benchmark.stop("preprocess")
-        # tell the GUI the audio duration + model name (for speed + model label)
+            self.benchmark.stop("audio_load")
         self.notifier.audio_info(audio_dur, os.path.basename(self.cfg.transcription.model))
-        chunks = chunk_audio(self.cfg.audio, norm, verbose=self.cfg.verbose)
+
+        is_chunked = bool(self.cfg.audio.chunk_file and audio_dur > self.cfg.audio.chunk_seconds)
+        chunks = (
+            chunk_audio(self.cfg.audio, normalized, verbose=self.cfg.verbose)
+            if is_chunked
+            else [normalized]
+        )
+        total_chunks = len(chunks)
 
         merged_segments: list[Segment] = []
         merged_text_parts: list[str] = []
-        offset_ms = 0
         detected_lang = ""
 
         for idx, chunk_path in enumerate(chunks):
-            is_chunked = len(chunks) > 1
-            label = f"chunk {idx + 1}/{len(chunks)}" if is_chunked else ""
-            self.notifier.stage("Transcribing", label) if is_chunked \
-                else self.notifier.stage("Transcribing", os.path.basename(path))
+            label = f"chunk {idx + 1}/{total_chunks}" if is_chunked else ""
+            if label:
+                self.notifier.stage("Transcribing", label)
+            offset_ms = 0
             if is_chunked:
                 offset_ms = idx * self.cfg.audio.chunk_seconds * 1000
             on_progress, on_segment = self._stt_callbacks(label)
@@ -260,6 +261,7 @@ class Pipeline:
             res = self.stt.transcribe(
                 chunk_path,
                 language=self.cfg.transcription.language,
+                initial_prompt=initial_prompt,
                 on_progress=on_progress,
                 on_segment=on_segment,
             )
@@ -285,9 +287,9 @@ class Pipeline:
             language=detected_lang,
         )
 
-    def transcribe_mic(self, duration: float) -> TranscriptionResult:
+    def transcribe_mic(self, duration: float, *, initial_prompt: str = "") -> TranscriptionResult:
         if duration <= 0:
-            return self._transcribe_mic_streaming()
+            return self._transcribe_mic_streaming(initial_prompt=initial_prompt)
         dur_label = f"{duration:g}s" if duration and duration > 0 else "until Stop"
         self.notifier.stage("Recording from microphone", dur_label)
         if self.benchmark:
@@ -309,6 +311,7 @@ class Pipeline:
         res = self.stt.transcribe(
             wav,
             language=self.cfg.transcription.language,
+            initial_prompt=initial_prompt,
             on_progress=on_progress,
             on_segment=on_segment,
         )
@@ -317,7 +320,7 @@ class Pipeline:
         self.notifier.progress(100, "")
         return res
 
-    def _transcribe_mic_streaming(self) -> TranscriptionResult:
+    def _transcribe_mic_streaming(self, *, initial_prompt: str = "") -> TranscriptionResult:
         self._wait_for_manual_start()
         self.notifier.stage("Recording from microphone", "live")
         self._recording = True
@@ -325,28 +328,25 @@ class Pipeline:
         model_name = os.path.basename(self.cfg.transcription.model)
         self.notifier.audio_info(0.0, model_name)
         stable_tail_ms = max(1200, int(self.cfg.audio.stream_chunk_s * 1000))
-        preview_poll_s = max(0.75, float(self.cfg.audio.stream_chunk_s or 1))
-        committed_until_ms = 0
-        live_committed: list[Segment] = []
-        final_wav = ""
-
-        def _emit_preview(text: str) -> None:
-            cb = getattr(self.notifier, "preview", None)
-            if callable(cb):
-                try:
-                    cb(text)
-                except Exception:  # noqa: BLE001
-                    pass
+        preview_poll_s = max(0.4, float(self.cfg.audio.stream_chunk_s) * 0.5)
 
         capture = LiveMicCapture(
             self.cfg.audio,
-            max_window_seconds=max(self.cfg.audio.stream_max_s, self.cfg.audio.stream_chunk_s * 4),
-            on_amplitude=self.notifier.amplitude,
+            max_window_seconds=self.cfg.audio.stream_max_s,
+            on_amplitude=self._on_amplitude,
             verbose=self.cfg.verbose,
         )
+        capture.start()
+
+        def _emit_preview(text: str) -> None:
+            cb = getattr(self.notifier, "on_stream_preview", None)
+            if callable(cb):
+                try:
+                    cb(text)
+                except Exception:
+                    pass
+
         try:
-            capture.start()
-            self._recording_stop_cb = capture.stop
             capture.wait_until_audio(timeout=2.0)
             while not self._stream_stop_evt.is_set():
                 capture.sleep(preview_poll_s)
@@ -360,6 +360,7 @@ class Pipeline:
                     preview_res = self.stt.transcribe(
                         wav_path,
                         language=self.cfg.transcription.language,
+                        initial_prompt=initial_prompt,
                     )
                 finally:
                     if wav_path and os.path.exists(wav_path):
@@ -368,37 +369,26 @@ class Pipeline:
                 absolute_segments: list[Segment] = []
                 for seg in preview_res.segments:
                     text = seg.text.strip()
-                    if not text or text == "[BLANK_AUDIO]":
+                    if not text:
+                        continue
+                    abs_start = seg.start_ms + offset_ms
+                    abs_end = seg.end_ms + offset_ms
+                    if abs_end < (total_ms - stable_tail_ms):
                         continue
                     absolute_segments.append(
                         Segment(
                             text=text,
-                            start_ms=seg.start_ms + offset_ms,
-                            end_ms=seg.end_ms + offset_ms,
-                            language=seg.language or preview_res.language,
+                            start_ms=abs_start,
+                            end_ms=abs_end,
+                            language=seg.language,
                         )
                     )
-
-                stable_cutoff_ms = max(0, total_ms - stable_tail_ms)
-                new_segments = [
-                    seg for seg in absolute_segments
-                    if seg.end_ms <= stable_cutoff_ms and seg.end_ms > committed_until_ms
-                ]
-                for seg in new_segments:
-                    live_committed.append(seg)
-                    self.notifier.segment(
-                        seg.text,
-                        f"{_fmt_timestamp_vtt(seg.start_ms)} --> {_fmt_timestamp_vtt(seg.end_ms)}",
-                    )
-                if new_segments:
-                    committed_until_ms = new_segments[-1].end_ms
-
-                preview_text = " ".join(
-                    seg.text for seg in absolute_segments if seg.end_ms > committed_until_ms
-                ).strip()
-                _emit_preview(preview_text)
-
-            self.notifier.stage("Transcribing", "finalizing microphone")
+                if absolute_segments:
+                    preview_text = " ".join(s.text for s in absolute_segments).strip()
+                    if preview_text:
+                        _emit_preview(preview_text)
+            self.notifier.stage("Finalizing transcription", "full pass")
+            final_wav = ""
             final_wav, total_dur, _ = capture.snapshot_full()
             self.notifier.audio_info(total_dur, model_name)
         finally:
@@ -413,6 +403,7 @@ class Pipeline:
             res = self.stt.transcribe(
                 final_wav,
                 language=self.cfg.transcription.language,
+                initial_prompt=initial_prompt,
                 on_progress=on_progress,
             )
         finally:
