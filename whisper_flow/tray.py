@@ -116,8 +116,14 @@ class TrayIcon:
             sys.stderr.write("[whisper-flow] Pillow not installed; tray icon disabled.\n")
             return
 
-        modes = ["none", "light", "medium", "high"]
-        styles = ["default", "casual", "very_casual", "formal"]
+        modes = [
+            "none", "light", "medium", "high",
+            "smart_list", "email", "coding", "meeting_notes", "social",
+        ]
+        styles = [
+            "default", "casual", "very_casual", "formal",
+            "concise", "academic", "storytelling", "enthusiastic",
+        ]
 
         def _make_mode_handler(m):
             def handler(icon, item):
@@ -145,7 +151,7 @@ class TrayIcon:
 
         mode_items = [
             pystray.MenuItem(
-                m.capitalize(),
+                m.replace("_", " ").title(),
                 _make_mode_handler(m),
                 checked=_mode_checked(m),
                 radio=True,

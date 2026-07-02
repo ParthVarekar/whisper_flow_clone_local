@@ -116,3 +116,19 @@ def test_config_save_and_load(tmp_path):
     assert loaded.dictation_hotkey == "ctrl+alt+space"
     assert loaded.snippets == {"test": "123"}
     assert loaded.app_styles == {"email": {"mode": "formal"}}
+
+
+def test_new_modes_and_styles():
+    from whisper_flow.prompts import build_prompt, resolve_mode
+    from whisper_flow.formatting import apply_smart_formatting
+
+    assert resolve_mode("bullets") == "smart_list"
+    assert resolve_mode("dev") == "coding"
+    assert resolve_mode("tweet") == "social"
+
+    sys_prompt, user_prompt = build_prompt("smart_list", "first item second item")
+    assert "bulleted or numbered list" in sys_prompt
+    assert "first item second item" in user_prompt
+
+    enthusiastic = apply_smart_formatting("this is great", writing_style="enthusiastic")
+    assert enthusiastic.endswith("!")

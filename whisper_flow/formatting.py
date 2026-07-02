@@ -110,7 +110,7 @@ def _apply_writing_style(text: str, writing_style: str) -> str:
     out = text.strip()
     if not out:
         return out
-    if style == "formal":
+    if style in {"formal", "academic"}:
         if out and out[0].islower():
             out = out[0].upper() + out[1:]
         if out[-1] not in ".!?":
@@ -123,5 +123,13 @@ def _apply_writing_style(text: str, writing_style: str) -> str:
             out = out.replace(" do not ", " don't ")
             out = out.replace(" cannot ", " can't ")
             out = out.replace("I am ", "I'm ")
+        return out
+    if style == "enthusiastic":
+        if out and out[0].islower():
+            out = out[0].upper() + out[1:]
+        if out[-1] == ".":
+            out = out[:-1] + "!"
+        elif out[-1] not in ".!?":
+            out += "!"
         return out
     return out

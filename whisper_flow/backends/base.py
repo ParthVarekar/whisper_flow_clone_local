@@ -48,6 +48,7 @@ class TranscriptionBackend(ABC):
 
     @abstractmethod
     def transcribe(self, audio_path: str, *, language: str = "auto",
+                   initial_prompt: str = "",
                    on_progress: Optional[ProgressFn] = None,
                    on_segment: Optional[SegmentFn] = None) -> TranscriptionResult:
         """Transcribe a 16kHz mono WAV file (or any file the backend accepts).

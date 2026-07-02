@@ -38,6 +38,29 @@ SYSTEM_PROMPTS = {
         "recognition noise, and repetition while preserving the speaker's meaning, "
         "tone, and structure. Output only the cleaned text."
     ),
+    "smart_list": (
+        "You are a formatting assistant. Convert the provided speech transcript "
+        "into a clean, logical, markdown-formatted bulleted or numbered list. "
+        "Remove conversational filler words and organize ideas logically. Output only the formatted list."
+    ),
+    "email": (
+        "You are an email drafting assistant. Convert the provided speech transcript "
+        "into a clean, professional email ready to send. Organize paragraphs clearly. "
+        "Do not add fictional names unless spoken. Output only the drafted email."
+    ),
+    "coding": (
+        "You are a developer dictation assistant. Format the spoken technical thoughts "
+        "into clean, clear documentation, code comments, or PR descriptions. Preserve exact "
+        "variable names, file names, and technical terms. Output only the formatted result."
+    ),
+    "meeting_notes": (
+        "You are a meeting assistant. Convert the spoken recap or discussion into structured "
+        "Meeting Notes with bullet points for Key Takeaways and Action Items. Output only the structured notes."
+    ),
+    "social": (
+        "You are a social media copywriter. Convert the spoken thoughts into a punchy, "
+        "engaging social media post (e.g. LinkedIn or Twitter/X style). Output only the post."
+    ),
     "command": (
         "You are a command extraction assistant. From the provided transcript, "
         "extract the single most likely shell command or a short JSON intent "
@@ -55,6 +78,11 @@ USER_TEMPLATES = {
     "correct": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nProvide the cleaned transcript.",
     "polish": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nProvide the polished transcript.",
     "medium": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nProvide the cleaned transcript.",
+    "smart_list": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nConvert into a structured list.",
+    "email": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nFormat as a professional email.",
+    "coding": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nFormat for developer documentation or comments.",
+    "meeting_notes": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nFormat as Meeting Notes.",
+    "social": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nFormat as an engaging social media post.",
     "command": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nExtract the command or intent.",
     "assistant": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"",
 }
@@ -64,10 +92,16 @@ ALIASES = {
     "light": "correct",
     "high": "polish",
     "summary": "summarize",
+    "bullets": "smart_list",
+    "list": "smart_list",
+    "dev": "coding",
+    "notes": "meeting_notes",
+    "tweet": "social",
 }
 
-VALID_MODES = {"summarize", "correct", "polish", "medium", "command", "assistant", "raw",
-               "none", "light", "high", "summary"}
+VALID_MODES = {"summarize", "correct", "polish", "medium", "smart_list", "email",
+               "coding", "meeting_notes", "social", "command", "assistant", "raw",
+               "none", "light", "high", "summary", "bullets", "list", "dev", "notes", "tweet"}
 
 
 def resolve_mode(mode: str) -> str:
