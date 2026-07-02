@@ -116,7 +116,7 @@ class WhisperCppBackend(TranscriptionBackend):
     # -- transcription -------------------------------------------------------
 
     def _build_cmd(self, audio_path: str, out_prefix: str, language: str,
-                   *, want_progress: bool) -> list[str]:
+                   *, initial_prompt: str = "", want_progress: bool) -> list[str]:
         c = self.cfg
         cmd = [
             c.whisper_bin,
@@ -127,6 +127,8 @@ class WhisperCppBackend(TranscriptionBackend):
             "-t", str(c.threads),
             "-np",            # silence model-load / system_info / timing noise on stderr
         ]
+        if initial_prompt and initial_prompt.strip():
+            cmd += ["--prompt", initial_prompt.strip()]
         if want_progress:
             # enables whisper_print_progress_callback on stderr (every 5%)
             cmd += ["-pp"]
@@ -164,6 +166,7 @@ class WhisperCppBackend(TranscriptionBackend):
         return cmd
 
     def transcribe(self, audio_path: str, *, language: str = "auto",
+                   initial_prompt: str = "",
                    on_progress: Optional[ProgressFn] = None,
                    on_segment: Optional[SegmentFn] = None) -> TranscriptionResult:
         from ..errors import CancelledError  # local import to avoid cycle
@@ -175,7 +178,8 @@ class WhisperCppBackend(TranscriptionBackend):
         want_progress = on_progress is not None
         with tempfile.TemporaryDirectory(prefix="whisperflow_") as tmp:
             out_prefix = os.path.join(tmp, "out")
-            cmd = self._build_cmd(audio_path, out_prefix, language, want_progress=want_progress)
+            cmd = self._build_cmd(audio_path, out_prefix, language,
+                                  initial_prompt=initial_prompt, want_progress=want_progress)
             self._log(f"running: {' '.join(cmd)}")
 
             stderr_tail: list[str] = []
