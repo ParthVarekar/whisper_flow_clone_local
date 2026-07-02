@@ -208,3 +208,53 @@ def render_table(by_kind: dict[str, list[ModelInfo]]) -> str:
         lines.append("No models found. Run scripts/download_models.sh first.")
         lines.append(f"Searched: {', '.join(default_model_dirs())}")
     return "\n".join(lines)
+
+
+def download_model(name: str, target_dir: Optional[str] = None) -> str:
+    """Download a Whisper ggml .bin or Silero VAD model using stdlib urllib.
+
+    Args:
+        name: e.g. "base.en", "small.en", "medium.en", or "vad" / "silero-v6.2.0".
+        target_dir: Destination folder (defaults to ./models).
+
+    Returns:
+        Absolute path to the downloaded model file.
+    """
+    import urllib.request
+    import sys as _sys
+
+    out_dir = target_dir or os.path.join(os.getcwd(), "models")
+    os.makedirs(out_dir, exist_ok=True)
+
+    name_lower = name.lower().replace("ggml-", "").replace(".bin", "")
+    if name_lower in ("vad", "silero", "silero-v6.2.0"):
+        filename = "ggml-silero-v6.2.0.bin"
+        url = "https://github.com/ggml-org/whisper.cpp/raw/master/models/ggml-silero-v6.2.0.bin"
+    elif name_lower in WHISPER_NAMES:
+        filename = f"ggml-{name_lower}.bin"
+        url = f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{filename}"
+    else:
+        raise ValueError(f"Unknown model name {name!r}. Available Whisper models: {', '.join(sorted(WHISPER_NAMES))}")
+
+    out_path = os.path.join(out_dir, filename)
+    if os.path.isfile(out_path) and os.path.getsize(out_path) > 1000:
+        _sys.stderr.write(f"[models] model already present at {out_path}\n")
+        return out_path
+
+    _sys.stderr.write(f"[models] downloading {filename} from {url}...\n")
+    try:
+        def _reporthook(block_num, block_size, total_size):
+            if total_size > 0:
+                pct = min(100, int((block_num * block_size / total_size) * 100))
+                _sys.stderr.write(f"\r[models] downloading... {pct}% ({block_num * block_size // 1048576} MB)")
+                _sys.stderr.flush()
+
+        urllib.request.urlretrieve(url, out_path, reporthook=_reporthook)
+        _sys.stderr.write("\n[models] download complete.\n")
+    except Exception as exc:
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        raise RuntimeError(f"Failed to download model {name!r}: {exc}") from exc
+
+    return out_path
+

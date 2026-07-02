@@ -6,6 +6,9 @@ mode = "high"
 verbose = false
 writing_style = "default"
 smart_formatting = true
+dictation_hotkey = "ctrl+shift+space"
+command_hotkey = "ctrl+shift+t"
+dictionary = ["Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "UNSLOTH"]
 
 [transcription]
 whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
@@ -30,5 +33,22 @@ host = "127.0.0.1"
 port = 8081
 n_ctx = 32768
 temperature = 0.3
-max_tokens = 512
+max_tokens = 2048
 top_p = 0.9
+
+[snippets]
+"my email" = "parth@example.com"
+"my signature" = "Best regards,\nParth"
+
+[app_styles.work_messaging]
+mode = "medium"
+writing_style = "formal"
+
+[app_styles.messaging]
+mode = "light"
+writing_style = "casual"
+
+[app_styles.code]
+mode = "none"
+writing_style = "default"
+

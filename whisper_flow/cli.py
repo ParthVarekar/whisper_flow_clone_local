@@ -320,6 +320,12 @@ def _cmd_check(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _cmd_daemon(args: argparse.Namespace) -> int:
+    from .daemon import run_daemon
+    cfg = load_config(args.config, _overrides_from_args(args))
+    return run_daemon(cfg)
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     from .server import run_server
     cfg = load_config(args.config, _overrides_from_args(args))
@@ -327,7 +333,16 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 def _cmd_models(args: argparse.Namespace) -> int:
-    from .models import default_model_dirs, list_models, pick_interactive, render_table
+    from .models import default_model_dirs, list_models, pick_interactive, render_table, download_model
+    if getattr(args, "download", None):
+        try:
+            path = download_model(args.download)
+            print(f"Downloaded model to: {path}")
+            return 0
+        except Exception as exc:
+            print(f"Error downloading model: {exc}")
+            return 1
+
     extra = args.model_dirs or []
     by_kind = list_models(extra)
     if args.select:
@@ -443,6 +458,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp_p.add_argument("--benchmark", metavar="DIR", help="write benchmark reports to DIR")
     sp_p.set_defaults(func=_cmd_process)
 
+    sp_daemon = sub.add_parser("daemon", help="run background daemon",
+                               parents=[parent])
+    _add_common_transcription_opts(sp_daemon)
+    _add_common_llm_opts(sp_daemon)
+    sp_daemon.set_defaults(func=_cmd_daemon)
+
     sp_c = sub.add_parser("check", help="preflight: verify binaries + models",
                           parents=[parent])
     _add_common_transcription_opts(sp_c)
@@ -461,6 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
                                parents=[parent])
     sp_models.add_argument("--select", choices=["whisper", "gguf", "vad"],
                            help="interactive selection for the given kind")
+    sp_models.add_argument("--download", help="download a model by name (e.g. small.en, medium.en, vad)")
     sp_models.add_argument("--model-dirs", nargs="*", help="extra dirs to scan")
     sp_models.set_defaults(func=_cmd_models)
 

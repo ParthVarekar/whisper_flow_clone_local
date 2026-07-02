@@ -135,6 +135,12 @@ class Config:
     # "raw"/"none" = no LLM (transcription only). The CLI `transcribe` cmd always uses raw.
     mode: str = "summarize"  # "none"|"light"|"medium"|"high"|"summarize"|"correct"|"polish"|"command"|"assistant"|"raw"
     verbose: bool = False
+    dictation_hotkey: str = "ctrl+shift+space"
+    command_hotkey: str = "ctrl+shift+t"
+    snippets: dict[str, str] = field(default_factory=dict)
+    dictionary: list[str] = field(default_factory=list)
+    app_styles: dict[str, dict[str, str]] = field(default_factory=dict)
+    custom_transforms: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -245,13 +251,18 @@ def load_config_file(path: str) -> dict[str, Any]:
 
 def _apply_dict(cfg: Config, data: dict[str, Any]) -> None:
     for key, value in data.items():
-        if isinstance(value, dict):
+        if key in ("snippets", "app_styles", "custom_transforms") and isinstance(value, dict):
+            setattr(cfg, key, value)
+        elif key == "dictionary" and isinstance(value, list):
+            setattr(cfg, key, value)
+        elif isinstance(value, dict):
             # nested section, e.g. {"transcription": {"model": "..."}}
             section = getattr(cfg, key, None)
-            if section is None:
-                raise ConfigError(f"unknown config section: {key!r}")
-            for sub_key, sub_val in value.items():
-                _set_dotted(cfg, f"{key}.{sub_key}", sub_val)
+            if section is None or isinstance(section, dict):
+                setattr(cfg, key, value)
+            else:
+                for sub_key, sub_val in value.items():
+                    _set_dotted(cfg, f"{key}.{sub_key}", sub_val)
         else:
             _set_dotted(cfg, key, value)
 
@@ -294,3 +305,58 @@ def load_config(
 def config_to_dict(cfg: Config) -> dict[str, Any]:
     d = asdict(cfg)
     return d
+
+
+def save_config(cfg: Config, path: str) -> None:
+    """Save Config to a TOML or JSON file."""
+    if not path:
+        return
+    ext = os.path.splitext(path)[1].lower()
+    data = config_to_dict(cfg)
+    if ext == ".json":
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    else:
+        # Minimal TOML serialization for standard config
+        lines = []
+        # Top-level scalars
+        for k, v in data.items():
+            if not isinstance(v, (dict, list)):
+                if isinstance(v, str):
+                    lines.append(f'{k} = "{v}"')
+                elif isinstance(v, bool):
+                    lines.append(f'{k} = {str(v).lower()}')
+                else:
+                    lines.append(f'{k} = {v}')
+        lines.append("")
+        # Tables
+        for k, v in data.items():
+            if isinstance(v, dict):
+                # First write flat keys of table k
+                has_scalars = any(not isinstance(sub_v, dict) for sub_v in v.values())
+                if has_scalars or not v:
+                    lines.append(f"[{k}]")
+                    for sub_k, sub_v in v.items():
+                        if not isinstance(sub_v, dict):
+                            if isinstance(sub_v, str):
+                                lines.append(f'{sub_k} = "{sub_v}"')
+                            elif isinstance(sub_v, bool):
+                                lines.append(f'{sub_k} = {str(sub_v).lower()}')
+                            else:
+                                lines.append(f'{sub_k} = {sub_v}')
+                    lines.append("")
+                # Next write sub-tables
+                for sub_k, sub_v in v.items():
+                    if isinstance(sub_v, dict):
+                        lines.append(f"[{k}.{sub_k}]")
+                        for ssk, ssv in sub_v.items():
+                            if isinstance(ssv, str):
+                                lines.append(f'{ssk} = "{ssv}"')
+                            elif isinstance(ssv, bool):
+                                lines.append(f'{ssk} = {str(ssv).lower()}')
+                            else:
+                                lines.append(f'{ssk} = {ssv}')
+                        lines.append("")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+

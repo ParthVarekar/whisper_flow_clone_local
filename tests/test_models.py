@@ -107,3 +107,19 @@ class TestDefaultDirs:
         monkeypatch.setenv("WHISPER_FLOW_MODELS_DIR", str(tmp_path))
         dirs = default_model_dirs()
         assert str(tmp_path) in dirs
+
+
+class TestDownloadModel:
+    def test_download_model_existing_skip(self, tmp_path):
+        from whisper_flow.models import download_model
+        p = tmp_path / "ggml-small.en.bin"
+        p.write_bytes(b"\x00" * 2000)
+        out = download_model("small.en", target_dir=str(tmp_path))
+        assert out == str(p)
+
+    def test_download_model_invalid_name(self, tmp_path):
+        import pytest
+        from whisper_flow.models import download_model
+        with pytest.raises(ValueError, match="Unknown model name"):
+            download_model("invalid_model_123", target_dir=str(tmp_path))
+
