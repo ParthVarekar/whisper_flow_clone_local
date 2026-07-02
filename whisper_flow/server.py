@@ -161,7 +161,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, result)
             else:  # /process
                 mode = fields.get("mode") or cfg.mode
-                if mode not in ("summarize", "correct", "polish", "command", "assistant", "raw"):
+                if mode not in ("none", "light", "medium", "high", "summarize",
+                                "correct", "polish", "command", "assistant", "raw"):
                     self._send_json(400, {"error": f"invalid mode: {mode!r}"})
                     return
                 cfg.mode = mode
@@ -182,7 +183,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing 'text' field"})
             return
         mode = payload.get("mode") or cfg.mode
-        if mode not in ("summarize", "correct", "polish", "command", "assistant", "raw"):
+        if mode not in ("none", "light", "medium", "high", "summarize",
+                        "correct", "polish", "command", "assistant", "raw"):
             self._send_json(400, {"error": f"invalid mode: {mode!r}"})
             return
         cfg.mode = mode

@@ -3,7 +3,7 @@
 Subcommands:
   transcribe  - transcribe an audio file (STT only)
   mic         - record from microphone and transcribe (STT only)
-  process     - transcribe + LLM post-processing (--mode summarize|correct|polish|command|assistant|raw)
+  process     - transcribe + LLM post-processing (--mode none|light|medium|high|summarize|correct|polish|command|assistant|raw)
   serve       - run a minimal local HTTP server wrapping the pipeline
   check       - preflight: verify binaries + models are present
 
@@ -56,7 +56,8 @@ def _add_common_transcription_opts(p: argparse.ArgumentParser) -> None:
 
 
 def _add_common_llm_opts(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--mode", choices=["summarize", "correct", "polish", "command", "assistant", "raw"],
+    p.add_argument("--mode", choices=["none", "light", "medium", "high", "summarize",
+                                      "correct", "polish", "command", "assistant", "raw"],
                    help="LLM post-processing mode")
     p.add_argument("--llm-model", help="path to GGUF LLM model")
     p.add_argument("--llm-mode", choices=["server", "cli"], help="llama.cpp access mode")
@@ -65,6 +66,8 @@ def _add_common_llm_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--temperature", type=float, help="LLM sampling temperature")
     p.add_argument("--max-tokens", type=int, help="LLM max generated tokens")
     p.add_argument("--gpu-layers", type=int, help="llama.cpp GPU layers (-ngl); 0=CPU")
+    p.add_argument("--writing-style", choices=["default", "casual", "very_casual", "formal"],
+                   help="dictation writing style")
 
 
 def _add_output_opts(p: argparse.ArgumentParser) -> None:
@@ -86,13 +89,13 @@ def _add_notifier_opts(p: argparse.ArgumentParser) -> None:
                    help="also fire desktop notifications (notify-send) on start/done/error")
 
 
-def _build_notifier(args: argparse.Namespace, *, verbose: bool):
+def _build_notifier(args: argparse.Namespace, *, verbose: bool, initial_mode: str = "summarize"):
     from .notifier import make_notifier
     gui = not bool(getattr(args, "no_gui", False))
     if getattr(args, "gui", False):
         gui = True
     return make_notifier(gui=gui, notify=bool(getattr(args, "notify", False)),
-                         title="whisper-flow", verbose=verbose)
+                         title="whisper-flow", verbose=verbose, initial_mode=initial_mode)
 
 
 def _overrides_from_args(args: argparse.Namespace) -> dict:
@@ -123,6 +126,7 @@ def _overrides_from_args(args: argparse.Namespace) -> dict:
     put("llm.temperature", getattr(args, "temperature", None))
     put("llm.max_tokens", getattr(args, "max_tokens", None))
     put("llm.gpu_layers", getattr(args, "gpu_layers", None))
+    put("writing_style", getattr(args, "writing_style", None))
 
     put("output.format", getattr(args, "output_format", None))
     put("output.write_files", getattr(args, "write_files", None))
@@ -219,7 +223,7 @@ def _cmd_transcribe(args: argparse.Namespace) -> int:
     file_path, use_mic = _resolve_input(args)
     cfg = load_config(args.config, _overrides_from_args(args))
     cfg.mode = "raw"  # transcribe = STT only
-    notifier = _build_notifier(args, verbose=cfg.verbose)
+    notifier = _build_notifier(args, verbose=cfg.verbose, initial_mode=cfg.mode)
     bench = _maybe_benchmark(args, cfg)
     pipe = Pipeline(cfg, notifier=notifier, benchmark=bench)
 
@@ -244,7 +248,7 @@ def _cmd_process(args: argparse.Namespace) -> int:
     cfg = load_config(args.config, _overrides_from_args(args))
     if cfg.mode == "raw":
         cfg.mode = "summarize"  # sensible default for `process`
-    notifier = _build_notifier(args, verbose=cfg.verbose)
+    notifier = _build_notifier(args, verbose=cfg.verbose, initial_mode=cfg.mode)
     bench = _maybe_benchmark(args, cfg)
     pipe = Pipeline(cfg, notifier=notifier, benchmark=bench)
 

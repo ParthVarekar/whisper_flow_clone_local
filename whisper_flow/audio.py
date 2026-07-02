@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import wave
 from typing import Callable, Iterator
 
@@ -267,6 +268,159 @@ def stream_mic_chunks(
             _ACTIVE_CAPTURE_STOP = None
 
 
+class LiveMicCapture:
+    """Continuous sounddevice microphone capture with rolling/full snapshots.
+
+    This powers the GUI Start/Stop live dictation flow: we keep a rolling window
+    for low-latency preview transcription while also retaining the full session
+    so Stop can trigger one final high-quality transcription pass.
+    """
+
+    def __init__(
+        self,
+        cfg: AudioConfig,
+        *,
+        max_window_seconds: int,
+        on_amplitude: Callable[[float], None] | None = None,
+        verbose: bool = False,
+    ):
+        self.cfg = cfg
+        self.max_window_seconds = max(1, int(max_window_seconds or 1))
+        self.on_amplitude = on_amplitude
+        self.verbose = verbose
+        self._lock = threading.Lock()
+        self._ready = threading.Event()
+        self._stop_evt = threading.Event()
+        self._rolling = deque()
+        self._rolling_frames = 0
+        self._all_parts = []
+        self._all_frames = 0
+        self._stream = None
+        self._started = False
+
+    def start(self) -> None:
+        try:
+            import sounddevice as sd
+        except ImportError as exc:
+            raise AudioError(
+                "live microphone mode requires the sounddevice backend; run `pip install sounddevice`"
+            ) from exc
+
+        fs = self.cfg.sample_rate
+        ch = self.cfg.channels
+        max_frames = max(fs, int(self.max_window_seconds * fs))
+
+        if self.verbose:
+            print(
+                f"[audio] live mic: fs={fs} ch={ch} window={self.max_window_seconds}s",
+                flush=True,
+            )
+
+        def _callback(indata, _frames, _time, _status) -> None:
+            nonlocal max_frames
+            arr = indata.copy()
+            with self._lock:
+                self._rolling.append(arr)
+                self._rolling_frames += len(arr)
+                self._all_parts.append(arr)
+                self._all_frames += len(arr)
+                while self._rolling_frames > max_frames and self._rolling:
+                    dropped = self._rolling.popleft()
+                    self._rolling_frames -= len(dropped)
+            if self.on_amplitude is not None:
+                try:
+                    import numpy as _np
+
+                    rms = float(_np.sqrt(_np.mean(arr.astype(_np.float32) ** 2))) / 32768.0
+                    self.on_amplitude(rms)
+                except Exception:  # noqa: BLE001
+                    pass
+            self._ready.set()
+            if self._stop_evt.is_set():
+                raise sd.CallbackStop()
+
+        try:
+            self._stream = sd.InputStream(
+                samplerate=fs,
+                channels=ch,
+                dtype="int16",
+                device=_sd_device(self.cfg.mic_device),
+                callback=_callback,
+            )
+            self._stream.start()
+        except Exception as exc:  # noqa: BLE001
+            raise AudioError(f"sounddevice live capture failed: {exc}") from exc
+
+        with _ACTIVE_CAPTURE_LOCK:
+            global _ACTIVE_CAPTURE_STOP
+            _ACTIVE_CAPTURE_STOP = self._stop_evt
+        self._started = True
+
+    def stop(self) -> None:
+        self._stop_evt.set()
+
+    def wait_until_audio(self, timeout: float = 2.0) -> bool:
+        return self._ready.wait(timeout)
+
+    def sleep(self, seconds: float) -> None:
+        deadline = time.monotonic() + max(0.0, seconds)
+        while not self._stop_evt.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.1, remaining))
+
+    @property
+    def stopped(self) -> bool:
+        return self._stop_evt.is_set()
+
+    @property
+    def total_duration_sec(self) -> float:
+        with self._lock:
+            return self._all_frames / self.cfg.sample_rate if self.cfg.sample_rate else 0.0
+
+    def snapshot_window(self) -> tuple[str, float, int]:
+        """Return `(wav_path, duration_seconds, offset_ms)` for the rolling window."""
+        return self._snapshot(full=False)
+
+    def snapshot_full(self) -> tuple[str, float, int]:
+        """Return `(wav_path, duration_seconds, offset_ms)` for the full session."""
+        return self._snapshot(full=True)
+
+    def close(self) -> None:
+        self._stop_evt.set()
+        try:
+            if self._stream is not None:
+                self._stream.stop()
+                self._stream.close()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            with _ACTIVE_CAPTURE_LOCK:
+                global _ACTIVE_CAPTURE_STOP
+                if _ACTIVE_CAPTURE_STOP is self._stop_evt:
+                    _ACTIVE_CAPTURE_STOP = None
+
+    def _snapshot(self, *, full: bool) -> tuple[str, float, int]:
+        try:
+            import numpy as _np
+        except ImportError as exc:
+            raise AudioError("numpy is required for live microphone snapshots") from exc
+
+        with self._lock:
+            parts = list(self._all_parts if full else self._rolling)
+            total_frames = self._all_frames
+        if not parts:
+            raise AudioError("no audio captured yet")
+        arr = _np.concatenate(parts, axis=0)
+        offset_frames = 0 if full else max(0, total_frames - len(arr))
+        return (
+            _write_wav_chunk(arr, self.cfg.sample_rate, self.cfg.channels),
+            len(arr) / self.cfg.sample_rate if self.cfg.sample_rate else 0.0,
+            int(round(offset_frames * 1000.0 / self.cfg.sample_rate)) if self.cfg.sample_rate else 0,
+        )
+
+
 def _write_wav_chunk(arr, sample_rate: int, channels: int) -> str:
     tmp = tempfile.NamedTemporaryFile(
         prefix="wf_stream_", suffix=".wav", delete=False, dir=tempfile.gettempdir()
@@ -279,6 +433,38 @@ def _write_wav_chunk(arr, sample_rate: int, channels: int) -> str:
         w.setframerate(sample_rate)
         w.writeframes(arr.tobytes())
     return out_path
+
+
+def list_sounddevice_input_devices() -> list[tuple[str, str]]:
+    """Return `(spec, label)` pairs for sounddevice input devices.
+
+    `spec` is suitable for `sounddevice.InputStream(device=...)`.
+    """
+    try:
+        import sounddevice as sd
+    except ImportError:
+        return [("default", "System default")]
+
+    items: list[tuple[str, str]] = [("default", "System default")]
+    try:
+        devices = sd.query_devices()
+        default_input = sd.default.device[0] if sd.default.device else None
+    except Exception:  # noqa: BLE001
+        return items
+
+    for idx, dev in enumerate(devices):
+        try:
+            max_in = int(dev.get("max_input_channels", 0) or 0)
+        except Exception:  # noqa: BLE001
+            max_in = 0
+        if max_in <= 0:
+            continue
+        name = str(dev.get("name", f"Input {idx}")).replace("\r", " ").replace("\n", " ").strip()
+        label = f"{idx}: {name}"
+        if default_input == idx:
+            label += " (Default)"
+        items.append((str(idx), label))
+    return items
 
 
 def _auto_mic_backend() -> str:

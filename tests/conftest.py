@@ -45,8 +45,9 @@ def tmp_wav_too_small() -> str:
 
 
 @pytest.fixture
-def tmp_models_dir() -> str:
+def tmp_models_dir(monkeypatch) -> str:
     """A temp dir populated with fake model files for discovery tests."""
+    monkeypatch.setattr("whisper_flow.models.default_model_dirs", lambda: [])
     d = tempfile.mkdtemp(prefix="wf_models_")
     for name in ("ggml-base.en.bin", "ggml-small.bin", "ggml-silero-v6.2.0.bin",
                  "gemma-3-1b-it-Q4_K_M.gguf", "model-Q9_X.gguf", "random.bin"):
@@ -55,3 +56,4 @@ def tmp_models_dir() -> str:
     yield d
     import shutil
     shutil.rmtree(d, ignore_errors=True)
+

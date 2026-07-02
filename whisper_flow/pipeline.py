@@ -14,11 +14,12 @@ from typing import TYPE_CHECKING, Optional
 
 import threading
 
-from .audio import capture_mic, chunk_audio, normalize_file, stop_active_capture, stream_mic_chunks
+from .audio import LiveMicCapture, capture_mic, chunk_audio, normalize_file, stop_active_capture
 from .backends import LlamaCppBackend, Segment, TranscriptionResult, WhisperCppBackend
 from .config import Config
+from .formatting import apply_smart_formatting
 from .notifier import Notifier, NullNotifier
-from .prompts import build_prompt
+from .prompts import build_prompt, resolve_mode
 
 if TYPE_CHECKING:
     from .benchmark import Benchmark
@@ -112,6 +113,7 @@ class Pipeline:
         self._cancel_requested = False
         self._start_evt: Optional[threading.Event] = None
         self._stream_stop_evt: Optional[threading.Event] = None
+        self._recording_stop_cb = None
         # wire the Cancel button to the STT backend's cancel() (registered lazily
         # once the backend is instantiated; safe to call before transcribe).
         self.notifier.register_cancel(self._cancel)
@@ -142,6 +144,11 @@ class Pipeline:
         continue". During transcription, fall back to a true cancel.
         """
         if self._recording:
+            if callable(self._recording_stop_cb):
+                try:
+                    self._recording_stop_cb()
+                except Exception:  # noqa: BLE001
+                    pass
             if self._stream_stop_evt is not None:
                 self._stream_stop_evt.set()
             stop_active_capture()
@@ -163,6 +170,7 @@ class Pipeline:
 
     def _wait_for_manual_start(self) -> None:
         """For GUI indefinite-mic sessions, wait for a Start button click."""
+        self._sync_mode_from_notifier()
         if not hasattr(self.notifier, "register_start"):
             return
         self._start_evt = threading.Event()
@@ -174,6 +182,36 @@ class Pipeline:
         if self._cancel_requested:
             from .errors import CancelledError
             raise CancelledError("recording cancelled before start")
+
+    def _sync_mode_from_notifier(self) -> None:
+        getter = getattr(self.notifier, "get_selected_mode", None)
+        if not callable(getter):
+            selected = ""
+        else:
+            try:
+                selected = str(getter() or "").strip()
+            except Exception:  # noqa: BLE001
+                selected = ""
+        if selected:
+            self.cfg.mode = selected
+
+        mic_getter = getattr(self.notifier, "get_selected_mic", None)
+        if callable(mic_getter):
+            try:
+                mic = str(mic_getter() or "").strip()
+            except Exception:  # noqa: BLE001
+                mic = ""
+            if mic:
+                self.cfg.audio.mic_device = mic
+
+        style_getter = getattr(self.notifier, "get_selected_writing_style", None)
+        if callable(style_getter):
+            try:
+                style = str(style_getter() or "").strip()
+            except Exception:  # noqa: BLE001
+                style = ""
+            if style:
+                self.cfg.writing_style = style
 
     def _stt_callbacks(self, chunk_label: str = ""):
         """Build on_progress/on_segment callables that forward to the notifier."""
@@ -284,83 +322,111 @@ class Pipeline:
         self.notifier.stage("Recording from microphone", "live")
         self._recording = True
         self._stream_stop_evt = threading.Event()
-        offset_ms = 0
-        merged_segments: list[Segment] = []
-        merged_text_parts: list[str] = []
         model_name = os.path.basename(self.cfg.transcription.model)
         self.notifier.audio_info(0.0, model_name)
+        stable_tail_ms = max(1200, int(self.cfg.audio.stream_chunk_s * 1000))
+        preview_poll_s = max(0.75, float(self.cfg.audio.stream_chunk_s or 1))
+        committed_until_ms = 0
+        live_committed: list[Segment] = []
+        final_wav = ""
 
+        def _emit_preview(text: str) -> None:
+            cb = getattr(self.notifier, "preview", None)
+            if callable(cb):
+                try:
+                    cb(text)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        capture = LiveMicCapture(
+            self.cfg.audio,
+            max_window_seconds=max(self.cfg.audio.stream_max_s, self.cfg.audio.stream_chunk_s * 4),
+            on_amplitude=self.notifier.amplitude,
+            verbose=self.cfg.verbose,
+        )
         try:
-            for wav_path, chunk_dur in stream_mic_chunks(
-                self.cfg.audio,
-                self.cfg.audio.stream_chunk_s,
-                on_amplitude=self.notifier.amplitude,
-                stop_event=self._stream_stop_evt,
-                verbose=self.cfg.verbose,
-            ):
-                self.notifier.stage("Transcribing", "live microphone")
-                base_offset_ms = offset_ms
-
-                def on_progress(pct: int, _detail: str) -> None:
-                    self.notifier.progress(pct, "live microphone")
-
-                def on_segment(text: str, ts: str) -> None:
-                    if not ts:
-                        self.notifier.segment(text, "")
-                        return
-                    start_txt, _, end_txt = ts.partition(" --> ")
-                    start_ms = _ts_to_ms(start_txt)
-                    end_ms = _ts_to_ms(end_txt)
-                    self.notifier.segment(
-                        text,
-                        f"{_fmt_timestamp_vtt(base_offset_ms + start_ms)} --> {_fmt_timestamp_vtt(base_offset_ms + end_ms)}",
+            capture.start()
+            self._recording_stop_cb = capture.stop
+            capture.wait_until_audio(timeout=2.0)
+            while not self._stream_stop_evt.is_set():
+                capture.sleep(preview_poll_s)
+                total_ms = int(round(capture.total_duration_sec * 1000))
+                self.notifier.audio_info(total_ms / 1000.0, model_name)
+                if total_ms < 700:
+                    continue
+                wav_path = ""
+                try:
+                    wav_path, _window_dur, offset_ms = capture.snapshot_window()
+                    preview_res = self.stt.transcribe(
+                        wav_path,
+                        language=self.cfg.transcription.language,
                     )
+                finally:
+                    if wav_path and os.path.exists(wav_path):
+                        os.remove(wav_path)
 
-                res = self.stt.transcribe(
-                    wav_path,
-                    language=self.cfg.transcription.language,
-                    on_progress=on_progress,
-                    on_segment=on_segment,
-                )
-                os.path.exists(wav_path) and os.remove(wav_path)
-                total_chunk_ms = int(round(chunk_dur * 1000))
-                offset_ms += total_chunk_ms
-                self.notifier.audio_info(offset_ms / 1000.0, model_name)
-
-                # Ignore explicit blank-audio markers in the growing transcript.
-                for seg in res.segments:
-                    if not seg.text or seg.text.strip() == "[BLANK_AUDIO]":
+                absolute_segments: list[Segment] = []
+                for seg in preview_res.segments:
+                    text = seg.text.strip()
+                    if not text or text == "[BLANK_AUDIO]":
                         continue
-                    merged_segments.append(
+                    absolute_segments.append(
                         Segment(
-                            text=seg.text,
-                            start_ms=seg.start_ms + base_offset_ms,
-                            end_ms=seg.end_ms + base_offset_ms,
-                            language=seg.language or res.language,
+                            text=text,
+                            start_ms=seg.start_ms + offset_ms,
+                            end_ms=seg.end_ms + offset_ms,
+                            language=seg.language or preview_res.language,
                         )
                     )
-                if res.text and res.text.strip() != "[BLANK_AUDIO]":
-                    merged_text_parts.append(res.text.strip())
-                if self._stream_stop_evt.is_set():
-                    break
-                self.notifier.stage("Recording from microphone", "live")
-        finally:
-            self._recording = False
-            self._stream_stop_evt = None
 
+                stable_cutoff_ms = max(0, total_ms - stable_tail_ms)
+                new_segments = [
+                    seg for seg in absolute_segments
+                    if seg.end_ms <= stable_cutoff_ms and seg.end_ms > committed_until_ms
+                ]
+                for seg in new_segments:
+                    live_committed.append(seg)
+                    self.notifier.segment(
+                        seg.text,
+                        f"{_fmt_timestamp_vtt(seg.start_ms)} --> {_fmt_timestamp_vtt(seg.end_ms)}",
+                    )
+                if new_segments:
+                    committed_until_ms = new_segments[-1].end_ms
+
+                preview_text = " ".join(
+                    seg.text for seg in absolute_segments if seg.end_ms > committed_until_ms
+                ).strip()
+                _emit_preview(preview_text)
+
+            self.notifier.stage("Transcribing", "finalizing microphone")
+            final_wav, total_dur, _ = capture.snapshot_full()
+            self.notifier.audio_info(total_dur, model_name)
+        finally:
+            _emit_preview("")
+            self._recording = False
+            self._recording_stop_cb = None
+            self._stream_stop_evt = None
+            capture.close()
+
+        try:
+            on_progress, _ = self._stt_callbacks("final")
+            res = self.stt.transcribe(
+                final_wav,
+                language=self.cfg.transcription.language,
+                on_progress=on_progress,
+            )
+        finally:
+            if final_wav and os.path.exists(final_wav):
+                os.remove(final_wav)
         self.notifier.progress(100, "")
-        text = " ".join(p for p in merged_text_parts if p).strip()
-        return TranscriptionResult(
-            text=text,
-            segments=merged_segments,
-            language=(merged_segments[0].language if merged_segments else ""),
-            raw={},
-        )
+        return res
 
     # -- transcription + LLM -------------------------------------------------
 
     def process(self, transcript: str) -> str:
         """Run the configured LLM mode on a transcript string."""
+        self._sync_mode_from_notifier()
+        self.cfg.mode = resolve_mode(self.cfg.mode)
         if self.cfg.mode == "raw":
             return transcript
         self.notifier.stage("LLM processing", self.cfg.mode)
@@ -377,6 +443,12 @@ class Pipeline:
             self.benchmark.stop("llm")
         return out
 
+    def _format_transcript(self, transcript: str) -> str:
+        self._sync_mode_from_notifier()
+        if not self.cfg.smart_formatting:
+            return transcript
+        return apply_smart_formatting(transcript, writing_style=self.cfg.writing_style)
+
     # -- full flow -----------------------------------------------------------
 
     def run_file(self, path: str) -> dict:
@@ -387,8 +459,10 @@ class Pipeline:
         written: list[str] = []
         try:
             result = self.transcribe_file(path)
+            result.text = self._format_transcript(result.text)
             processed = self.process(result.text) if self.cfg.mode != "raw" else result.text
             written = write_outputs(result, self.cfg, source_name=path)
+            self._publish_results(result.text, processed)
             self.notifier.done("transcription complete")
         except CancelledError:
             # graceful cancel — don't show as error; return whatever we have
@@ -414,8 +488,10 @@ class Pipeline:
         written: list[str] = []
         try:
             result = self.transcribe_mic(duration)
+            result.text = self._format_transcript(result.text)
             processed = self.process(result.text) if self.cfg.mode != "raw" else result.text
             written = write_outputs(result, self.cfg, source_name="microphone")
+            self._publish_results(result.text, processed)
             self.notifier.done("transcription complete")
         except CancelledError:
             self.notifier.done("canceled")
@@ -452,6 +528,16 @@ class Pipeline:
             "canceled": canceled,
             "partial": bool(raw.get("_partial", False)),
         }
+
+    def _publish_results(self, transcript: str, processed: str) -> None:
+        cb = getattr(self.notifier, "result", None)
+        if not callable(cb):
+            return
+        try:
+            cb("transcript", transcript)
+            cb("processed", processed)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _ts_to_ms(ts: str) -> int:

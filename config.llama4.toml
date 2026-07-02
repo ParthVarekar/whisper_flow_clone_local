@@ -2,8 +2,10 @@
 # Start the server with:
 # D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
 
-mode = "summarize"
-verbose = true
+mode = "high"
+verbose = false
+writing_style = "default"
+smart_formatting = true
 
 [transcription]
 whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
@@ -16,8 +18,8 @@ flash_attention = false
 mic_backend = "sounddevice"
 mic_device = "default"
 stream = true
-stream_chunk_s = 2
-stream_max_s = 30
+stream_chunk_s = 1
+stream_max_s = 12
 
 [llm]
 mode = "server"

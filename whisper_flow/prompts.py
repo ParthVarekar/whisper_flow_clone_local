@@ -32,6 +32,12 @@ SYSTEM_PROMPTS = {
         "false starts, and repetition, while preserving the speaker's meaning, "
         "intent, and language. Output only the polished text."
     ),
+    "medium": (
+        "You are a dictation cleanup assistant. Rewrite the provided transcript into "
+        "clear, concise, natural prose. Remove filler words, false starts, minor "
+        "recognition noise, and repetition while preserving the speaker's meaning, "
+        "tone, and structure. Output only the cleaned text."
+    ),
     "command": (
         "You are a command extraction assistant. From the provided transcript, "
         "extract the single most likely shell command or a short JSON intent "
@@ -48,15 +54,29 @@ USER_TEMPLATES = {
     "summarize": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nProvide a concise summary.",
     "correct": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nProvide the cleaned transcript.",
     "polish": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nProvide the polished transcript.",
+    "medium": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nProvide the cleaned transcript.",
     "command": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"\n\nExtract the command or intent.",
     "assistant": "Transcript:\n\"\"\"\n{transcript}\n\"\"\"",
 }
 
-VALID_MODES = {"summarize", "correct", "polish", "command", "assistant", "raw"}
+ALIASES = {
+    "none": "raw",
+    "light": "correct",
+    "high": "polish",
+    "summary": "summarize",
+}
+
+VALID_MODES = {"summarize", "correct", "polish", "medium", "command", "assistant", "raw",
+               "none", "light", "high", "summary"}
+
+
+def resolve_mode(mode: str) -> str:
+    return ALIASES.get(mode, mode)
 
 
 def build_prompt(mode: str, transcript: str) -> tuple[str, str]:
     """Return (system, user) prompt strings for the given mode."""
+    mode = resolve_mode(mode)
     if mode == "raw":
         return "", transcript
     if mode not in SYSTEM_PROMPTS:

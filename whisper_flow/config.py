@@ -129,9 +129,11 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    writing_style: str = "default"  # "default" | "casual" | "very_casual" | "formal"
+    smart_formatting: bool = True
     # LLM post-processing mode for the `process` command.
-    # "raw" = no LLM (transcription only). The CLI `transcribe` cmd always uses raw.
-    mode: str = "summarize"  # "summarize" | "correct" | "polish" | "command" | "assistant" | "raw"
+    # "raw"/"none" = no LLM (transcription only). The CLI `transcribe` cmd always uses raw.
+    mode: str = "summarize"  # "none"|"light"|"medium"|"high"|"summarize"|"correct"|"polish"|"command"|"assistant"|"raw"
     verbose: bool = False
 
 
