@@ -215,7 +215,9 @@ class Daemon:
                     if wav_path and os.path.exists(wav_path):
                         os.remove(wav_path)
                 preview_text = res.text.strip()
-                if preview_text:
+                # Filter out common streaming/chunk hallucinations from whisper models
+                hallucinations = {"[BLANK_AUDIO]", "Thank you for watching", "Thanks for watching.", "Subscribe to my channel", "..."}
+                if preview_text and preview_text not in hallucinations and not preview_text.startswith("Thank you for watching"):
                     self._overlay.on_stream_preview(preview_text)
             except Exception:  # noqa: BLE001
                 pass  # Don't crash the preview loop on transient errors
@@ -234,18 +236,18 @@ class Daemon:
             self._tray.set_state("processing")
             self._tray.update_tooltip("whisper-flow (processing)")
 
-        # Get active app info for history
-        proc_name, _ = get_active_window_info()
+        # Get active app info for history and context
+        proc_name, title = get_active_window_info()
         app_cat = detect_app_category()
 
         # Process in background thread so hotkey listener isn't blocked
         threading.Thread(
             target=self._process_dictation,
-            args=(duration, proc_name, app_cat),
+            args=(duration, proc_name, app_cat, title),
             daemon=True,
         ).start()
 
-    def _process_dictation(self, duration: float, app_name: str, app_cat: str) -> None:
+    def _process_dictation(self, duration: float, app_name: str, app_cat: str, window_title: str = "") -> None:
         """Transcribe, format, cleanup, and insert text."""
         capture = self._capture
         if capture is None:
@@ -271,10 +273,14 @@ class Daemon:
             capture.close()
             self._capture = None
 
-            # Construct acoustic biasing prompt
+            # Construct acoustic biasing prompt (enriching from Windows window title)
             biasing_words = list(self._dictionary) if self._dictionary else []
             if app_name and app_name.strip():
                 biasing_words.append(app_name.strip())
+            if window_title and window_title.strip():
+                # Extract clean words/identifiers from window title (e.g. file names, subjects)
+                title_words = [w.strip() for w in window_title.replace("-", " ").replace("—", " ").split() if len(w.strip()) > 2]
+                biasing_words.extend(title_words[:8])  # keep top 8 title identifiers
             initial_p = ", ".join(biasing_words)
 
             # Transcribe
@@ -318,10 +324,11 @@ class Daemon:
                 sys.stderr.write(f"[whisper-flow] auto-detected intent mode: {mode}\n")
 
             if mode != "raw":
+                enriched_ctx = f"{app_name} ({window_title})" if window_title else app_name
                 system, user = build_prompt(
                     mode, transcript,
                     context_words=self._dictionary,
-                    app_context=app_name,
+                    app_context=enriched_ctx,
                 )
                 processed = self._pipeline.llm.process(
                     user,

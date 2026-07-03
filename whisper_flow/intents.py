@@ -44,7 +44,7 @@ def detect_auto_intent(transcript: str, app_category: str = "", app_name: str = 
         "variable", "config.", "pytest", "github", "pull request", "repository",
         "powershell", "terminal", "command line", "sys.stderr", "git commit",
     ]
-    if app_cat in ("ide", "terminal") or any(kw in lower for kw in code_keywords):
+    if app_cat in ("code", "ide", "terminal") or any(kw in lower for kw in code_keywords):
         return "coding"
 
     # 4. Check for meeting notes
@@ -67,6 +67,10 @@ def detect_auto_intent(transcript: str, app_category: str = "", app_name: str = 
     ]
     if any(lower.startswith(kw) for kw in transform_keywords):
         return "transform"
+
+    # 7. Check if dictating into chat / messaging apps (Slack, Discord, WhatsApp)
+    if app_cat in ("messaging", "work_messaging"):
+        return "medium"
 
     # Default to confident, executive/professional polish
     return "polish"
