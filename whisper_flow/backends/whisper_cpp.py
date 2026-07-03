@@ -266,22 +266,20 @@ class WhisperCppBackend(TranscriptionBackend):
                         + "\n".join(stderr_tail[-30:]).strip()
                     )
 
-            json_path = out_prefix + ".json"
-            if not os.path.isfile(json_path):
-                raise TranscriptionError(
-                    f"whisper-cli produced no JSON output (expected {json_path}).\n"
-                    + "\n".join(stderr_tail[-30:]).strip()
-                )
-
-            result = self._parse_json(json_path)
-            # empty-transcript guard: exit 0 but no segments → likely silent audio
-            if not result.segments and not result.text:
-                raise TranscriptionError(
-                    "empty transcript — audio may be silent, too quiet, or in an "
-                    "unsupported language. Try a different language flag or check the "
-                    "recording level."
-                )
-            return result
+                json_path = out_prefix + ".json"
+                if not os.path.isfile(json_path):
+                    raise TranscriptionError(
+                        f"whisper-cli produced no JSON output (expected {json_path}).\n"
+                        + "\n".join(stderr_tail[-30:]).strip()
+                    )
+                result = self._parse_json(json_path)
+                if not result.segments and not result.text:
+                    raise TranscriptionError(
+                        "empty transcript — audio may be silent, too quiet, or in an "
+                        "unsupported language. Try a different language flag or check the "
+                        "recording level."
+                    )
+                return result
 
     def _try_parse_partial(self, json_path: str) -> Optional[TranscriptionResult]:
         """Best-effort parse of a partial JSON file (whisper-cli may have flushed

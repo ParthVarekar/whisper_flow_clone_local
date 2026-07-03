@@ -349,6 +349,9 @@ class Daemon:
             # Insert at cursor
             insert_text(processed)
 
+            # Display result in floating overlay HUD
+            self._overlay.show_result(processed)
+
             # Save to history
             try:
                 save_dictation(

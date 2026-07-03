@@ -24,6 +24,7 @@ _MSG_HIDE = "hide"
 _MSG_STATUS = "status"
 _MSG_AMPLITUDE = "amplitude"
 _MSG_PROCESSING = "processing"
+_MSG_RESULT = "result"
 
 
 class OverlayNotifier:
@@ -115,6 +116,12 @@ class OverlayNotifier:
     def show_processing(self) -> None:
         """Update overlay to show processing state."""
         self._q.put((_MSG_PROCESSING, "Processing..."))
+
+    def show_result(self, text: str) -> None:
+        """Show final transcribed & cleaned output in the floating HUD."""
+        if text:
+            display = text if len(text) <= 60 else text[:57] + "..."
+            self._q.put((_MSG_RESULT, display))
 
     def set_mode(self, mode: str) -> None:
         self._selected_mode = mode
@@ -308,6 +315,13 @@ class OverlayNotifier:
                         # Trigger Pop animation transition
                         phase[0] = "pop"
                         pop_time[0] = time.monotonic()
+                    elif msg_type == _MSG_RESULT:
+                        status_var.set(f"✨ {data}")
+                        phase[0] = "done"
+                        dot.delete("all")
+                        dot.create_oval(2, 2, 12, 12, fill="#22c55e", outline="")
+                        # Schedule auto-hide after 1.8s
+                        root.after(1800, lambda: self.hide() if phase[0] == "done" else None)
                     elif msg_type == _MSG_AMPLITUDE:
                         rms = float(data)
                         meter_level[0] = max(rms, meter_level[0] * 0.85)
