@@ -199,17 +199,92 @@ class OverlayNotifier:
 
         _position()
 
+        # State variables for animation loop
+        phase = ["idle"]  # "recording", "pop", "processing", "done"
+        pop_time = [0.0]
+        anim_step = [0]
         meter_level = [0.0]
 
-        def _update_meter():
-            meter_canvas.delete("all")
-            amp = min(1.0, meter_level[0] * 10.0)
-            bar_w = int(amp * 76)
-            if bar_w > 0:
-                color = "#4ade80" if amp < 0.6 else "#facc15" if amp < 0.85 else "#ef4444"
-                meter_canvas.create_rectangle(2, 3, 2 + bar_w, 11, fill=color, outline="")
-            else:
-                meter_canvas.create_rectangle(2, 3, 4, 11, fill="#444", outline="")
+        def _render_frame():
+            now = time.monotonic()
+            current_phase = phase[0]
+            anim_step[0] += 1
+            step = anim_step[0]
+
+            # --- 1. POP TRANSITION ANIMATION ---
+            if current_phase == "pop":
+                elapsed = now - pop_time[0]
+                if elapsed < 0.15:
+                    # Pop scale expansion (scale up to 18px dot)
+                    dot.delete("all")
+                    dot.create_oval(0, 0, 14, 14, fill="#22c55e", outline="#4ade80", width=2)
+                else:
+                    # Pop finished -> transition to processing phase
+                    phase[0] = "processing"
+                    dot.delete("all")
+                    dot.create_oval(2, 2, 12, 12, fill="#a855f7", outline="")
+
+            # --- 2. RECORDING PHASE: Equalizer Waveform & Pulse Dot ---
+            elif current_phase == "recording":
+                # Pulsing red recording dot
+                pulse_color = "#ef4444" if (step // 8) % 2 == 0 else "#f87171"
+                dot.itemconfig(dot_id, fill=pulse_color)
+
+                # Render 5-bar animated audio equalizer waveform
+                meter_canvas.delete("all")
+                amp = min(1.0, meter_level[0] * 10.0)
+                import math
+                num_bars = 5
+                bar_width = 8
+                spacing = 5
+                start_x = 8
+                canvas_h = 14
+
+                for i in range(num_bars):
+                    # Combine audio amplitude with smooth harmonic wave
+                    sine_wave = math.sin((step * 0.25) + (i * 0.8)) * 0.25 + 0.25
+                    bar_h = int(max(3.0, (amp * 11.0 * (0.6 + sine_wave)) + 2.0))
+                    bar_h = min(canvas_h, bar_h)
+
+                    x0 = start_x + i * (bar_width + spacing)
+                    y1 = (canvas_h + bar_h) // 2
+                    y0 = y1 - bar_h
+
+                    # Color gradient per bar
+                    colors = ["#38bdf8", "#818cf8", "#a855f7", "#c084fc", "#4ade80"]
+                    color = colors[i % len(colors)] if amp > 0.05 else "#4b5563"
+                    meter_canvas.create_rectangle(x0, y0, x0 + bar_width, y1, fill=color, outline="")
+
+            # --- 3. PROCESSING PHASE: Bouncing Purple/Cyan Wave Shimmer ---
+            elif current_phase == "processing":
+                dot.itemconfig(dot_id, fill="#a855f7")
+                meter_canvas.delete("all")
+                import math
+                num_dots = 4
+                canvas_h = 14
+                start_x = 10
+                spacing = 16
+
+                for i in range(num_dots):
+                    # Smooth harmonic bouncing wave
+                    offset = math.sin((step * 0.2) + (i * 0.7)) * 4.0
+                    cy = (canvas_h // 2) + offset
+                    r = 3.5
+
+                    # Soft violet to cyan gradient
+                    colors = ["#a855f7", "#818cf8", "#38bdf8", "#34d399"]
+                    color = colors[i % len(colors)]
+                    meter_canvas.create_oval(
+                        start_x + i * spacing - r,
+                        cy - r,
+                        start_x + i * spacing + r,
+                        cy + r,
+                        fill=color,
+                        outline=""
+                    )
+
+            # Schedule next animation frame (~30ms for 33 FPS)
+            root.after(30, _render_frame)
 
         def _poll():
             try:
@@ -217,24 +292,29 @@ class OverlayNotifier:
                     msg_type, data = self._q.get_nowait()
                     if msg_type == _MSG_SHOW:
                         status_var.set(str(data) or "Listening...")
-                        dot.itemconfig(dot_id, fill="#ff4444")
+                        phase[0] = "recording"
+                        dot.delete("all")
+                        dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
                         _position()
                         root.deiconify()
                     elif msg_type == _MSG_HIDE:
+                        phase[0] = "idle"
                         root.withdraw()
                         meter_level[0] = 0.0
                     elif msg_type == _MSG_STATUS:
                         status_var.set(str(data))
                     elif msg_type == _MSG_PROCESSING:
                         status_var.set(str(data) or "Processing...")
-                        dot.itemconfig(dot_id, fill="#facc15")
+                        # Trigger Pop animation transition
+                        phase[0] = "pop"
+                        pop_time[0] = time.monotonic()
                     elif msg_type == _MSG_AMPLITUDE:
                         rms = float(data)
-                        meter_level[0] = max(rms, meter_level[0] * 0.9)
-                        _update_meter()
+                        meter_level[0] = max(rms, meter_level[0] * 0.85)
             except queue.Empty:
                 pass
-            root.after(50, _poll)
+            root.after(40, _poll)
 
-        root.after(50, _poll)
+        root.after(30, _render_frame)
+        root.after(40, _poll)
         root.mainloop()
