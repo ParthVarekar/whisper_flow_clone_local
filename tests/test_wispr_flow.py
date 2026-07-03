@@ -256,3 +256,24 @@ def test_windows_context_enrichment():
 
     sys_prompt, _ = build_prompt("polish", "update the function", app_context=enriched_ctx)
     assert "code.exe (prompts.py - whisper - Visual Studio Code)" in sys_prompt
+
+
+def test_dynamic_vocabulary_learning(tmp_path):
+    """Test extracting candidate terms and updating learned vocabulary."""
+    from whisper_flow.vocabulary import extract_candidate_terms, update_learned_vocabulary, load_learned_vocabulary
+
+    sample_text = "We are deploying the new WhisperFlow daemon.py module with PyTorch and GGUF."
+    terms = extract_candidate_terms(sample_text)
+    assert "WhisperFlow" in terms
+    assert "daemon.py" in terms
+    assert "PyTorch" in terms
+    assert "GGUF" in terms
+
+    vocab_dir = str(tmp_path / "vocab_test")
+    learned = update_learned_vocabulary(sample_text, vocab_dir=vocab_dir)
+    assert "WhisperFlow" in learned
+    assert "daemon.py" in learned
+
+    loaded = load_learned_vocabulary(vocab_dir=vocab_dir)
+    assert "WhisperFlow" in loaded
+    assert "daemon.py" in loaded

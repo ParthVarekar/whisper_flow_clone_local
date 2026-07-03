@@ -58,7 +58,11 @@ class Daemon:
         # Per-app style cache
         self._app_styles = getattr(cfg, "app_styles", {})
         self._snippets = getattr(cfg, "snippets", {})
-        self._dictionary = getattr(cfg, "dictionary", [])
+        base_dict = list(getattr(cfg, "dictionary", []))
+        from .vocabulary import load_learned_vocabulary
+        learned_words = load_learned_vocabulary()
+        # Merge preserving order and uniqueness
+        self._dictionary = base_dict + [w for w in learned_words if w not in base_dict]
 
     def run(self) -> None:
         """Start the daemon (blocking). Call from main thread."""
@@ -352,7 +356,7 @@ class Daemon:
             # Display result in floating overlay HUD
             self._overlay.show_result(processed)
 
-            # Save to history
+            # Save to history & update dynamic learned vocabulary
             try:
                 save_dictation(
                     transcript=transcript,
@@ -363,6 +367,12 @@ class Daemon:
                     app_category=app_cat,
                     duration_sec=duration,
                 )
+                from .vocabulary import update_learned_vocabulary
+                updated_vocab = update_learned_vocabulary(processed)
+                if updated_vocab:
+                    for w in updated_vocab:
+                        if w not in self._dictionary:
+                            self._dictionary.append(w)
             except Exception:  # noqa: BLE001
                 pass
 
