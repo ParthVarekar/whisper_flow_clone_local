@@ -205,6 +205,11 @@ class Daemon:
                 if total_ms < 600:
                     continue
                 wav_path, _win_dur, _offset = capture.snapshot_window()
+                with self._lock:
+                    if not self._recording:
+                        if wav_path and os.path.exists(wav_path):
+                            os.remove(wav_path)
+                        break
                 try:
                     res = self._pipeline.stt.transcribe(
                         wav_path,

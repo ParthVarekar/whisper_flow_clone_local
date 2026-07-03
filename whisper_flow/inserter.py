@@ -89,13 +89,13 @@ def _insert_windows(text: str) -> None:
         return
 
     # -- Simulate Ctrl+V --
-    time.sleep(0.05)  # Small delay for clipboard to settle
+    time.sleep(0.08)  # Delay for clipboard to settle
     _send_ctrl_v()
-    time.sleep(0.05)
+    time.sleep(0.1)
 
-    # -- Restore old clipboard --
+    # -- Restore old clipboard after application pastes --
     if old_clipboard is not None:
-        time.sleep(0.1)  # Wait for paste to complete
+        time.sleep(0.25)  # Allow Windows target app enough time to process paste
         try:
             if user32.OpenClipboard(0):
                 user32.EmptyClipboard()
@@ -144,14 +144,17 @@ def _send_ctrl_v() -> None:
         inp.union.ki.dwFlags = flags
         return inp
 
-    inputs = (INPUT * 4)(
-        _make_key_input(VK_CONTROL),           # Ctrl down
-        _make_key_input(VK_V),                 # V down
-        _make_key_input(VK_V, KEYEVENTF_KEYUP),  # V up
-        _make_key_input(VK_CONTROL, KEYEVENTF_KEYUP),  # Ctrl up
-    )
+    # Send Ctrl down, V down, V up, Ctrl up with micro-delays for Windows message queues
+    ctrl_down = (INPUT * 1)(_make_key_input(VK_CONTROL))
+    v_press = (INPUT * 2)(_make_key_input(VK_V), _make_key_input(VK_V, KEYEVENTF_KEYUP))
+    ctrl_up = (INPUT * 1)(_make_key_input(VK_CONTROL, KEYEVENTF_KEYUP))
 
-    ctypes.windll.user32.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+    user32 = ctypes.windll.user32
+    user32.SendInput(1, ctypes.byref(ctrl_down), ctypes.sizeof(INPUT))
+    time.sleep(0.01)
+    user32.SendInput(2, ctypes.byref(v_press), ctypes.sizeof(INPUT))
+    time.sleep(0.01)
+    user32.SendInput(1, ctypes.byref(ctrl_up), ctypes.sizeof(INPUT))
 
 
 def _send_ctrl_c() -> None:

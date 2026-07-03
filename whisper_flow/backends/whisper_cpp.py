@@ -72,6 +72,7 @@ class WhisperCppBackend(TranscriptionBackend):
         self.verbose = verbose
         self._proc: Optional[subprocess.Popen] = None
         self._cancel_requested = False
+        self._transcribe_lock = threading.Lock()
 
     # -- checks --------------------------------------------------------------
 
@@ -174,91 +175,96 @@ class WhisperCppBackend(TranscriptionBackend):
         if not os.path.isfile(audio_path):
             raise TranscriptionError(f"audio file not found: {audio_path!r}")
 
-        self._cancel_requested = False
-        want_progress = on_progress is not None
-        with tempfile.TemporaryDirectory(prefix="whisperflow_") as tmp:
-            out_prefix = os.path.join(tmp, "out")
-            cmd = self._build_cmd(audio_path, out_prefix, language,
-                                  initial_prompt=initial_prompt, want_progress=want_progress)
-            self._log(f"running: {' '.join(cmd)}")
+        with self._transcribe_lock:
+            self._cancel_requested = False
+            want_progress = on_progress is not None
+            with tempfile.TemporaryDirectory(prefix="whisperflow_") as tmp:
+                out_prefix = os.path.join(tmp, "out")
+                cmd = self._build_cmd(audio_path, out_prefix, language,
+                                      initial_prompt=initial_prompt, want_progress=want_progress)
+                self._log(f"running: {' '.join(cmd)}")
 
-            stderr_tail: list[str] = []
-            try:
-                self._proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=1,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
-            except FileNotFoundError as exc:
-                self._proc = None
-                raise BinaryNotFoundError(self.cfg.whisper_bin, str(exc)) from exc
-
-            # Two reader threads so neither pipe can deadlock the other.
-            def _read_stderr() -> None:
-                assert self._proc is not None and self._proc.stderr is not None
-                for line in self._proc.stderr:
-                    line = line.rstrip("\n")
-                    if not line:
-                        continue
-                    stderr_tail.append(line)
-                    self._log(f"[stderr] {line}")
-                    if on_progress is not None:
-                        pct = parse_progress_line(line)
-                        if pct is not None:
-                            try:
-                                on_progress(pct, "")
-                            except Exception:  # noqa: BLE001 — notifier must never break STT
-                                pass
-
-            def _read_stdout() -> None:
-                assert self._proc is not None and self._proc.stdout is not None
-                for line in self._proc.stdout:
-                    if on_segment is None:
-                        continue
-                    parsed = parse_segment_line(line)
-                    if parsed is None:
-                        continue
-                    start_ts, end_ts, text = parsed
-                    try:
-                        on_segment(text, f"{start_ts} --> {end_ts}")
-                    except Exception:  # noqa: BLE001
-                        pass
-
-            t_err = threading.Thread(target=_read_stderr, daemon=True)
-            t_out = threading.Thread(target=_read_stdout, daemon=True)
-            t_err.start()
-            t_out.start()
-            self._proc.wait()
-            t_err.join(timeout=2.0)
-            t_out.join(timeout=2.0)
-            proc = self._proc
-            self._proc = None
-
-            if self._cancel_requested:
-                # still try to recover partial output below before raising
-                partial = self._try_parse_partial(out_prefix + ".json")
-                if partial is not None:
-                    partial.raw["_partial"] = True
-                    raise CancelledError(
-                        f"transcription cancelled by user (partial: {len(partial.segments)} segments)"
+                stderr_tail: list[str] = []
+                try:
+                    self._proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        bufsize=1,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
                     )
-                raise CancelledError("transcription cancelled by user")
+                except FileNotFoundError as exc:
+                    self._proc = None
+                    raise BinaryNotFoundError(self.cfg.whisper_bin, str(exc)) from exc
 
-            if proc.returncode != 0:
-                # crashed subprocess: attempt partial recovery from any JSON written
-                partial = self._try_parse_partial(out_prefix + ".json")
-                if partial is not None and partial.segments:
-                    partial.raw["_partial"] = True
-                    self._log(f"whisper-cli crashed (code {proc.returncode}) — recovered {len(partial.segments)} partial segments")
-                    return partial
-                raise TranscriptionError(
-                    f"whisper-cli exited with code {proc.returncode}\n"
-                    + "\n".join(stderr_tail[-30:]).strip()
-                )
+                local_proc = self._proc
+
+                # Two reader threads so neither pipe can deadlock the other.
+                def _read_stderr() -> None:
+                    if local_proc is None or local_proc.stderr is None:
+                        return
+                    for line in local_proc.stderr:
+                        line = line.rstrip("\n")
+                        if not line:
+                            continue
+                        stderr_tail.append(line)
+                        self._log(f"[stderr] {line}")
+                        if on_progress is not None:
+                            pct = parse_progress_line(line)
+                            if pct is not None:
+                                try:
+                                    on_progress(pct, "")
+                                except Exception:  # noqa: BLE001 — notifier must never break STT
+                                    pass
+
+                def _read_stdout() -> None:
+                    if local_proc is None or local_proc.stdout is None:
+                        return
+                    for line in local_proc.stdout:
+                        if on_segment is None:
+                            continue
+                        parsed = parse_segment_line(line)
+                        if parsed is None:
+                            continue
+                        start_ts, end_ts, text = parsed
+                        try:
+                            on_segment(text, f"{start_ts} --> {end_ts}")
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                t_err = threading.Thread(target=_read_stderr, daemon=True)
+                t_out = threading.Thread(target=_read_stdout, daemon=True)
+                t_err.start()
+                t_out.start()
+                if local_proc is not None:
+                    local_proc.wait()
+                t_err.join(timeout=2.0)
+                t_out.join(timeout=2.0)
+                self._proc = None
+
+                if self._cancel_requested:
+                    # still try to recover partial output below before raising
+                    partial = self._try_parse_partial(out_prefix + ".json")
+                    if partial is not None:
+                        partial.raw["_partial"] = True
+                        raise CancelledError(
+                            f"transcription cancelled by user (partial: {len(partial.segments)} segments)"
+                        )
+                    raise CancelledError("transcription cancelled by user")
+
+                if local_proc is not None and local_proc.returncode != 0:
+                    # crashed subprocess: attempt partial recovery from any JSON written
+                    partial = self._try_parse_partial(out_prefix + ".json")
+                    if partial is not None and partial.segments:
+                        partial.raw["_partial"] = True
+                        self._log(f"whisper-cli crashed (code {local_proc.returncode}) — recovered {len(partial.segments)} partial segments")
+                        return partial
+                    raise TranscriptionError(
+                        f"whisper-cli exited with code {local_proc.returncode}\n"
+                        + "\n".join(stderr_tail[-30:]).strip()
+                    )
 
             json_path = out_prefix + ".json"
             if not os.path.isfile(json_path):
