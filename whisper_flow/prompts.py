@@ -97,10 +97,12 @@ ALIASES = {
     "dev": "coding",
     "notes": "meeting_notes",
     "tweet": "social",
+    "mind_reader": "auto",
 }
 
 VALID_MODES = {"summarize", "correct", "polish", "medium", "smart_list", "email",
                "coding", "meeting_notes", "social", "command", "assistant", "raw",
+               "auto", "mind_reader",
                "none", "light", "high", "summary", "bullets", "list", "dev", "notes", "tweet"}
 
 

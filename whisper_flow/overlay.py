@@ -40,7 +40,7 @@ class OverlayNotifier:
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
         self._cancel_cb: Optional[Callable[[], None]] = None
-        self._selected_mode = "high"
+        self._selected_mode = "auto"
         self._selected_mic = "default"
         self._selected_writing_style = "default"
 
@@ -58,7 +58,13 @@ class OverlayNotifier:
 
     def preview(self, text: str) -> None:
         if text:
-            self._q.put((_MSG_STATUS, "Listening..."))
+            # Truncate to last ~60 chars for the tiny overlay
+            display = text if len(text) <= 60 else "..." + text[-57:]
+            self._q.put((_MSG_STATUS, display))
+
+    def on_stream_preview(self, text: str) -> None:
+        """Called by the live preview loop with partial transcription text."""
+        self.preview(text)
 
     def amplitude(self, rms: float) -> None:
         self._q.put((_MSG_AMPLITUDE, rms))
@@ -185,7 +191,7 @@ class OverlayNotifier:
         # Position at bottom-center of screen
         def _position():
             sw = root.winfo_screenwidth()
-            w = 260
+            w = 420
             h = 44
             x = (sw - w) // 2
             y = root.winfo_screenheight() - h - 80  # 80px from bottom

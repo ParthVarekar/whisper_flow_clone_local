@@ -176,11 +176,49 @@ class Daemon:
                 verbose=self.cfg.verbose,
             )
             self._capture.start()
+            # Start live preview loop in background
+            threading.Thread(
+                target=self._live_preview_loop, daemon=True
+            ).start()
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"[whisper-flow] mic error: {exc}\n")
             self._overlay.error(str(exc))
             with self._lock:
                 self._recording = False
+
+    def _live_preview_loop(self) -> None:
+        """Periodically transcribe a rolling window and show partial text in overlay."""
+        poll_s = max(0.8, float(self.cfg.audio.stream_chunk_s) * 0.6)
+        biasing_words = list(self._dictionary) if self._dictionary else []
+        initial_p = ", ".join(biasing_words)
+
+        while True:
+            time.sleep(poll_s)
+            with self._lock:
+                if not self._recording:
+                    break
+            capture = self._capture
+            if capture is None:
+                break
+            try:
+                total_ms = int(round(capture.total_duration_sec * 1000))
+                if total_ms < 600:
+                    continue
+                wav_path, _win_dur, _offset = capture.snapshot_window()
+                try:
+                    res = self._pipeline.stt.transcribe(
+                        wav_path,
+                        language=self.cfg.transcription.language,
+                        initial_prompt=initial_p,
+                    )
+                finally:
+                    if wav_path and os.path.exists(wav_path):
+                        os.remove(wav_path)
+                preview_text = res.text.strip()
+                if preview_text:
+                    self._overlay.on_stream_preview(preview_text)
+            except Exception:  # noqa: BLE001
+                pass  # Don't crash the preview loop on transient errors
 
     def _on_dictation_stop(self) -> None:
         with self._lock:

@@ -132,3 +132,101 @@ def test_new_modes_and_styles():
 
     enthusiastic = apply_smart_formatting("this is great", writing_style="enthusiastic")
     assert enthusiastic.endswith("!")
+
+
+def test_auto_intent_detection():
+    """Test that detect_auto_intent correctly routes speech to formatting modes."""
+    from whisper_flow.intents import detect_auto_intent
+
+    # Lists / enumeration
+    assert detect_auto_intent("first of all we need to fix the bug and second we need tests") == "smart_list"
+    assert detect_auto_intent("Here are the steps to deploy the app") == "smart_list"
+    assert detect_auto_intent("bullet point one is speed bullet point two is accuracy") == "smart_list"
+
+    # Email
+    assert detect_auto_intent("Dear team, I wanted to share an update on the project status") == "email"
+    assert detect_auto_intent("Hi Sarah, just following up on our conversation from yesterday, best regards") == "email"
+
+    # Coding (via app context)
+    assert detect_auto_intent("we should refactor the module", app_category="ide") == "coding"
+    assert detect_auto_intent("open the terminal and run the build", app_category="terminal") == "coding"
+
+    # Coding (via keywords)
+    assert detect_auto_intent("the function takes two arguments and returns a string") == "coding"
+
+    # Meeting notes
+    assert detect_auto_intent("the key takeaways from today's meeting were three items") == "meeting_notes"
+    assert detect_auto_intent("action items for the team include updating the docs") == "meeting_notes"
+
+    # Social
+    assert detect_auto_intent("tweet this announcement about our new product launch") == "social"
+    assert detect_auto_intent("hashtag machine learning is trending right now") == "social"
+
+    # Default → polish
+    assert detect_auto_intent("we are making good progress on the whisper flow project") == "polish"
+
+
+def test_auto_mode_alias():
+    """Test that mind_reader resolves to auto and auto is a valid mode."""
+    from whisper_flow.prompts import resolve_mode, VALID_MODES
+
+    assert resolve_mode("mind_reader") == "auto"
+    assert resolve_mode("auto") == "auto"
+    assert "auto" in VALID_MODES
+    assert "mind_reader" in VALID_MODES
+
+
+def test_context_vocabulary_injection():
+    """Test that build_prompt injects context words into the system prompt."""
+    from whisper_flow.prompts import build_prompt
+
+    sys_prompt, user_prompt = build_prompt(
+        "polish", "we are testing the whisper flow app",
+        context_words=["Wispr Flow", "Antigravity", "GGUF"],
+        app_context="Windows Terminal",
+    )
+    assert "Wispr Flow" in sys_prompt
+    assert "Antigravity" in sys_prompt
+    assert "GGUF" in sys_prompt
+    assert "Windows Terminal" in sys_prompt
+    assert "we are testing the whisper flow app" in user_prompt
+
+    # Without context words — no context block injected
+    sys_plain, _ = build_prompt("polish", "hello world")
+    assert "Contextual Intelligence" not in sys_plain
+
+    # With empty list — no context block
+    sys_empty, _ = build_prompt("polish", "hello world", context_words=[])
+    assert "Contextual Intelligence" not in sys_empty
+
+
+def test_disfluency_filtering_instruction():
+    """Test that the system prompt contains internal monologue filtering instructions."""
+    from whisper_flow.prompts import build_prompt
+
+    sys_prompt, _ = build_prompt("polish", "some transcript text")
+    assert "think-aloud" in sys_prompt or "verbal searching" in sys_prompt
+
+
+def test_whisper_cpp_initial_prompt_flag():
+    """Test that _build_cmd includes --prompt when initial_prompt is provided."""
+    from whisper_flow.backends.whisper_cpp import WhisperCppBackend
+    from whisper_flow.config import Config
+
+    cfg = Config()
+    cfg.transcription.whisper_bin = "whisper-cli"
+    cfg.transcription.model = "/tmp/model.bin"
+    backend = WhisperCppBackend(cfg.transcription)
+
+    # With initial_prompt
+    cmd = backend._build_cmd("/tmp/audio.wav", "/tmp/out", "en",
+                              initial_prompt="Wispr Flow, GGUF, Antigravity",
+                              want_progress=False)
+    assert "--prompt" in cmd
+    prompt_idx = cmd.index("--prompt")
+    assert cmd[prompt_idx + 1] == "Wispr Flow, GGUF, Antigravity"
+
+    # Without initial_prompt
+    cmd_empty = backend._build_cmd("/tmp/audio.wav", "/tmp/out", "en",
+                                    initial_prompt="", want_progress=False)
+    assert "--prompt" not in cmd_empty
