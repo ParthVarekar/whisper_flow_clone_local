@@ -24,7 +24,7 @@ if %ERRORLEVEL% EQU 0 (
 ) else (
     echo [STARTING] Launching local llama-server on port 8081...
     if exist "D:\llama4\llama-server.exe" (
-        start "llama-server" /min "D:\llama4\llama-server.exe" -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+        start "llama-server" /min "D:\llama4\llama-server.exe" -m "D:\llama4\qwen2.5-coder-7b.gguf" --host 127.0.0.1 --port 8081 -c 16384 -ngl 99
         echo [OK] llama-server process started in background window.
         timeout /t 3 /nobreak >nul
     ) else (

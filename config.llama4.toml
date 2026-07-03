@@ -8,7 +8,7 @@ writing_style = "default"
 smart_formatting = true
 dictation_hotkey = "ctrl+shift+space"
 command_hotkey = "ctrl+shift+t"
-dictionary = ["Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "UNSLOTH"]
+dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API"]
 
 [transcription]
 whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
