@@ -233,10 +233,17 @@ class Daemon:
             capture.close()
             self._capture = None
 
+            # Construct acoustic biasing prompt
+            biasing_words = list(self._dictionary) if self._dictionary else []
+            if app_name and app_name.strip():
+                biasing_words.append(app_name.strip())
+            initial_p = ", ".join(biasing_words)
+
             # Transcribe
             result = self._pipeline.stt.transcribe(
                 wav_path,
                 language=self.cfg.transcription.language,
+                initial_prompt=initial_p,
             )
             transcript = result.text.strip()
 
@@ -264,10 +271,20 @@ class Daemon:
             if self._snippets:
                 transcript = expand_snippets(transcript, self._snippets)
 
-            # LLM cleanup
-            mode = resolve_mode(self._overlay.get_selected_mode())
+            # LLM cleanup & auto-intent routing
+            raw_selected_mode = self._overlay.get_selected_mode()
+            mode = resolve_mode(raw_selected_mode)
+            if mode in ("auto", "mind_reader"):
+                from .intents import detect_auto_intent
+                mode = detect_auto_intent(transcript, app_category=app_cat, app_name=app_name)
+                sys.stderr.write(f"[whisper-flow] auto-detected intent mode: {mode}\n")
+
             if mode != "raw":
-                system, user = build_prompt(mode, transcript)
+                system, user = build_prompt(
+                    mode, transcript,
+                    context_words=self._dictionary,
+                    app_context=app_name,
+                )
                 processed = self._pipeline.llm.process(
                     user,
                     system=system,
@@ -401,10 +418,16 @@ class Daemon:
             capture.close()
             self._capture = None
 
-            # Transcribe the voice instruction
+            # Transcribe the voice instruction with acoustic biasing
+            biasing_words = list(self._dictionary) if self._dictionary else []
+            if app_name and app_name.strip():
+                biasing_words.append(app_name.strip())
+            initial_p = ", ".join(biasing_words)
+
             result = self._pipeline.stt.transcribe(
                 wav_path,
                 language=self.cfg.transcription.language,
+                initial_prompt=initial_p,
             )
             instruction = result.text.strip()
 

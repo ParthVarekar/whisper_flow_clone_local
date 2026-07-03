@@ -229,18 +229,21 @@ class Pipeline:
 
     def transcribe_file(self, path: str, *, initial_prompt: str = "") -> TranscriptionResult:
         """Normalize + (optionally) chunk + transcribe a file. Merges chunk segments."""
+        from .audio import validate_wav  # local import to avoid cycle at module load
+        self.notifier.stage("Normalizing audio", os.path.basename(path))
         if self.benchmark:
-            self.benchmark.start("audio_load")
-        normalized, audio_dur = normalize_file(self.cfg.audio, path, verbose=self.cfg.verbose)
+            self.benchmark.start("preprocess")
+        norm = normalize_file(self.cfg.audio, path, verbose=self.cfg.verbose)
+        audio_dur = validate_wav(norm)
         if self.benchmark:
-            self.benchmark.stop("audio_load")
+            self.benchmark.stop("preprocess")
         self.notifier.audio_info(audio_dur, os.path.basename(self.cfg.transcription.model))
 
-        is_chunked = bool(self.cfg.audio.chunk_file and audio_dur > self.cfg.audio.chunk_seconds)
+        is_chunked = bool(self.cfg.audio.chunk_seconds > 0 and audio_dur > self.cfg.audio.chunk_seconds)
         chunks = (
-            chunk_audio(self.cfg.audio, normalized, verbose=self.cfg.verbose)
+            chunk_audio(self.cfg.audio, norm, verbose=self.cfg.verbose)
             if is_chunked
-            else [normalized]
+            else [norm]
         )
         total_chunks = len(chunks)
 

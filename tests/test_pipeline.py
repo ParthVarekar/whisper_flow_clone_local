@@ -39,7 +39,7 @@ class RecordingNotifier(NullNotifier):
 class MockSTT(TranscriptionBackend):
     name = "mock"
     def check(self): pass
-    def transcribe(self, path, *, language="auto", on_progress=None, on_segment=None):
+    def transcribe(self, path, *, language="auto", initial_prompt="", on_progress=None, on_segment=None):
         if on_progress: on_progress(50, "")
         if on_segment: on_segment("hello world", "00:00:00.000 --> 00:00:02.000")
         if on_progress: on_progress(100, "")
@@ -60,14 +60,14 @@ class MockLLM(LLMBackend):
 class CancelSTT(TranscriptionBackend):
     name = "cancel"
     def check(self): pass
-    def transcribe(self, path, *, language="auto", on_progress=None, on_segment=None):
+    def transcribe(self, path, *, language="auto", initial_prompt="", on_progress=None, on_segment=None):
         raise CancelledError("user cancelled")
 
 
 class EmptySTT(TranscriptionBackend):
     name = "empty"
     def check(self): pass
-    def transcribe(self, path, *, language="auto", on_progress=None, on_segment=None):
+    def transcribe(self, path, *, language="auto", initial_prompt="", on_progress=None, on_segment=None):
         return TranscriptionResult(text="", segments=[], language="")
 
 

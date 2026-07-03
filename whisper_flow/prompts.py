@@ -108,7 +108,9 @@ def resolve_mode(mode: str) -> str:
     return ALIASES.get(mode, mode)
 
 
-def build_prompt(mode: str, transcript: str) -> tuple[str, str]:
+def build_prompt(mode: str, transcript: str, *,
+                 context_words: list[str] | None = None,
+                 app_context: str = "") -> tuple[str, str]:
     """Return (system, user) prompt strings for the given mode."""
     mode = resolve_mode(mode)
     if mode == "raw":
@@ -116,5 +118,26 @@ def build_prompt(mode: str, transcript: str) -> tuple[str, str]:
     if mode not in SYSTEM_PROMPTS:
         raise ValueError(f"unknown mode: {mode!r}")
     system = SYSTEM_PROMPTS[mode]
+
+    # Add advanced internal monologue filtering instruction
+    system += (
+        " Also filter out internal think-aloud commentary, verbal searching, or side "
+        "remarks to oneself (e.g., 'what do you call that', 'let me see'). Output strictly the intended text."
+    )
+
+    # Inject Contextual Vocabulary and Active Window Context if available
+    context_blocks = []
+    if context_words and len(context_words) > 0:
+        words_str = ", ".join(w.strip() for w in context_words if w.strip())
+        if words_str:
+            context_blocks.append(
+                f"Authoritative Context Vocabulary & Proper Nouns (always prefer exact spelling for phonetically similar words): {words_str}"
+            )
+    if app_context and app_context.strip():
+        context_blocks.append(f"Active Application Window: {app_context.strip()}")
+
+    if context_blocks:
+        system += "\n\nContextual Intelligence:\n" + "\n".join(context_blocks)
+
     user = USER_TEMPLATES[mode].format(transcript=transcript)
     return system, user
