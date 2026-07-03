@@ -54,7 +54,7 @@ class TrayIcon:
         on_mode_change: Optional[Callable[[str], None]] = None,
         on_style_change: Optional[Callable[[str], None]] = None,
         on_open_settings: Optional[Callable[[], None]] = None,
-        current_mode: str = "high",
+        current_mode: str = "auto",
         current_style: str = "default",
     ):
         self._on_quit = on_quit
@@ -117,7 +117,7 @@ class TrayIcon:
             return
 
         modes = [
-            "none", "light", "medium", "high",
+            "auto", "none", "light", "medium", "high",
             "smart_list", "email", "coding", "meeting_notes", "social",
         ]
         styles = [
