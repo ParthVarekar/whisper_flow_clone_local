@@ -277,3 +277,59 @@ def test_dynamic_vocabulary_learning(tmp_path):
     loaded = load_learned_vocabulary(vocab_dir=vocab_dir)
     assert "WhisperFlow" in loaded
     assert "daemon.py" in loaded
+
+
+def test_clean_llm_output():
+    """Test _clean_llm_output strips Transcript: prefix and wrapping quotes."""
+    from whisper_flow.daemon import _clean_llm_output
+
+    # Strip "Transcript:" prefix
+    assert _clean_llm_output('Transcript:\n"Hello world."') == "Hello world."
+    # Strip wrapping double-quotes
+    assert _clean_llm_output('"Now, one device to another."') == "Now, one device to another."
+    # Strip triple-quotes
+    assert _clean_llm_output('"""\nHello world.\n"""') == "Hello world."
+    # Pass through clean text
+    assert _clean_llm_output("Clean text already.") == "Clean text already."
+    # Case-insensitive prefix
+    assert _clean_llm_output("transcript: some text") == "some text"
+    # Output: prefix
+    assert _clean_llm_output("Output:\nResult here") == "Result here"
+
+
+def test_qwen3_asr_backend_selection():
+    """Test that Pipeline selects Qwen3AsrBackend when config backend is 'qwen3_asr'."""
+    from whisper_flow.config import Config
+    from whisper_flow.pipeline import Pipeline
+    from whisper_flow.backends.qwen3_asr import Qwen3AsrBackend
+    from whisper_flow.backends.whisper_cpp import WhisperCppBackend
+
+    cfg_whisper = Config()
+    cfg_whisper.transcription.backend = "whisper_cpp"
+    p1 = Pipeline(cfg_whisper)
+    assert isinstance(p1.stt, WhisperCppBackend)
+
+    cfg_qwen = Config()
+    cfg_qwen.transcription.backend = "qwen3_asr"
+    p2 = Pipeline(cfg_qwen)
+    assert isinstance(p2.stt, Qwen3AsrBackend)
+
+
+def test_qwen3_asr_output_cleaning():
+    """Test Qwen3AsrBackend._clean_output strips special tokens."""
+    from whisper_flow.backends.qwen3_asr import Qwen3AsrBackend
+
+    assert Qwen3AsrBackend._clean_output("<|im_start|>Hello world<|im_end|>") == "Hello world"
+    assert Qwen3AsrBackend._clean_output("assistant\nHello there") == "Hello there"
+    assert Qwen3AsrBackend._clean_output("Just plain text.") == "Just plain text."
+
+
+def test_prompt_no_transcript_prefix():
+    """Test that new prompts don't contain Transcript: prefix or triple-quotes."""
+    from whisper_flow.prompts import build_prompt
+
+    _, user = build_prompt("polish", "Hello world test")
+    assert "Transcript:" not in user
+    assert '"""' not in user
+    assert "Hello world test" in user
+

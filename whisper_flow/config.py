@@ -44,6 +44,7 @@ WHISPER_AUDIO_CODEC = "pcm_s16le"
 class TranscriptionConfig:
     """whisper.cpp (STT) backend settings."""
 
+    backend: str = "whisper_cpp"  # "whisper_cpp" | "qwen3_asr"
     whisper_bin: str = DEFAULT_WHISPER_BIN
     model: str = ""  # path to ggml Whisper .bin (e.g. ggml-base.en.bin)
     language: str = "auto"  # "auto", "en", "fr", ... ; "auto" lets whisper detect
@@ -65,6 +66,10 @@ class TranscriptionConfig:
     vad_min_silence_ms: int = 0  # -vsd; 0 = whisper.cpp default
     vad_max_speech_s: int = 0    # -vmsd; 0 = whisper.cpp default (no cap)
     vad_speech_pad_ms: int = 0   # -vp; 0 = whisper.cpp default
+    # Qwen3-ASR: multimodal speech-LLM via llama-mtmd-cli
+    qwen3_asr_bin: str = ""      # path to llama-mtmd-cli(.exe)
+    qwen3_asr_model: str = ""    # path to Qwen3-ASR-*.gguf
+    qwen3_asr_mmproj: str = ""   # path to mmproj-Qwen3-ASR-*.gguf
 
 
 @dataclass

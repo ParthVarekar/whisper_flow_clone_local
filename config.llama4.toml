@@ -1,5 +1,5 @@
 # Local llama.cpp setup for Whisperflow.
-# Start the server with:
+# Start the LLM server with:
 # D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
 
 mode = "auto"
@@ -11,8 +11,14 @@ command_hotkey = "ctrl+shift+t"
 dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API"]
 
 [transcription]
+backend = "qwen3_asr"
+# Whisper (legacy, kept for fallback)
 whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
 model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
+# Qwen3-ASR (primary STT engine)
+qwen3_asr_bin = 'D:\llama4\llama-mtmd-cli.exe'
+qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
+qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
 language = "en"
 threads = 8
 flash_attention = false

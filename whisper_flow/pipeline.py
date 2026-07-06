@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Optional
 import threading
 
 from .audio import LiveMicCapture, capture_mic, chunk_audio, normalize_file, stop_active_capture
-from .backends import LlamaCppBackend, Segment, TranscriptionResult, WhisperCppBackend
+from .backends import LlamaCppBackend, Qwen3AsrBackend, Segment, TranscriptionBackend, TranscriptionResult, WhisperCppBackend
 from .config import Config
 from .formatting import apply_smart_formatting
 from .notifier import Notifier, NullNotifier
@@ -106,7 +106,7 @@ class Pipeline:
         # still get nothing printed (use NullNotifier(verbose=True) for logs)
         self.notifier: Notifier = notifier if notifier is not None else NullNotifier()
         self.benchmark: Optional[Benchmark] = benchmark
-        self._stt: Optional[WhisperCppBackend] = None
+        self._stt: Optional[TranscriptionBackend] = None
         self._llm: Optional[LlamaCppBackend] = None
         self._recording = False
         self._awaiting_start = False
@@ -124,9 +124,13 @@ class Pipeline:
                 pass
 
     @property
-    def stt(self) -> WhisperCppBackend:
+    def stt(self) -> TranscriptionBackend:
         if self._stt is None:
-            self._stt = WhisperCppBackend(self.cfg.transcription, verbose=self.cfg.verbose)
+            backend = getattr(self.cfg.transcription, "backend", "whisper_cpp")
+            if backend == "qwen3_asr":
+                self._stt = Qwen3AsrBackend(self.cfg.transcription, verbose=self.cfg.verbose)
+            else:
+                self._stt = WhisperCppBackend(self.cfg.transcription, verbose=self.cfg.verbose)
         return self._stt
 
     @property

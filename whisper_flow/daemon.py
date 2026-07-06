@@ -37,6 +37,21 @@ from .formatting import apply_smart_formatting
 from .prompts import resolve_mode, build_prompt
 
 
+def _clean_llm_output(text: str) -> str:
+    """Strip common LLM echo artifacts: 'Transcript:' prefix, wrapping quotes."""
+    import re
+    t = text.strip()
+    # Remove leading 'Transcript:' line
+    t = re.sub(r'^(?:Transcript|Output|Result)\s*:\s*\n?', '', t, flags=re.IGNORECASE).strip()
+    # Remove wrapping triple-quotes
+    if t.startswith('"""') and t.endswith('"""'):
+        t = t[3:-3].strip()
+    # Remove wrapping double-quotes
+    elif t.startswith('"') and t.endswith('"') and t.count('"') == 2:
+        t = t[1:-1].strip()
+    return t
+
+
 class Daemon:
     """Main daemon class that orchestrates the Wispr Flow-like experience."""
 
@@ -349,6 +364,9 @@ class Daemon:
                 processed = transcript
 
             sys.stderr.write(f"[whisper-flow] output:\n{processed}\n")
+
+            # Strip LLM echo artifacts (Transcript: prefix, wrapping quotes)
+            processed = _clean_llm_output(processed)
 
             # Insert at cursor
             insert_text(processed)

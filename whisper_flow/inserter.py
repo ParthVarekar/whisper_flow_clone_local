@@ -41,21 +41,7 @@ def _insert_windows(text: str) -> None:
     CF_UNICODETEXT = 13
     GMEM_MOVEABLE = 0x0002
 
-    # -- Save current clipboard --
-    old_clipboard = None
-    try:
-        if user32.OpenClipboard(0):
-            h = user32.GetClipboardData(CF_UNICODETEXT)
-            if h:
-                p = kernel32.GlobalLock(h)
-                if p:
-                    old_clipboard = ctypes.wstring_at(p)
-                    kernel32.GlobalUnlock(h)
-            user32.CloseClipboard()
-    except Exception:  # noqa: BLE001
-        pass
-
-    # -- Set new text to clipboard --
+    # -- Set new text to clipboard (no save/restore — text stays for re-paste) --
     try:
         if not user32.OpenClipboard(0):
             # Retry once after a short delay
@@ -93,29 +79,15 @@ def _insert_windows(text: str) -> None:
     _send_ctrl_v()
     time.sleep(0.1)
 
-    # -- Restore old clipboard after application pastes --
-    if old_clipboard is not None:
-        time.sleep(0.25)  # Allow Windows target app enough time to process paste
-        try:
-            if user32.OpenClipboard(0):
-                user32.EmptyClipboard()
-                buf = (old_clipboard + "\0").encode("utf-16-le")
-                h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(buf))
-                if h_mem:
-                    p = kernel32.GlobalLock(h_mem)
-                    ctypes.memmove(p, buf, len(buf))
-                    kernel32.GlobalUnlock(h_mem)
-                    user32.SetClipboardData(CF_UNICODETEXT, h_mem)
-                user32.CloseClipboard()
-        except Exception:  # noqa: BLE001
-            pass
-
 
 def _send_ctrl_v() -> None:
     """Simulate Ctrl+V keystroke using Windows SendInput."""
     import ctypes
 
+    VK_SHIFT = 0x10
     VK_CONTROL = 0x11
+    VK_MENU = 0x12
+    VK_SPACE = 0x20
     VK_V = 0x56
     KEYEVENTF_KEYUP = 0x0002
     INPUT_KEYBOARD = 1
@@ -144,12 +116,23 @@ def _send_ctrl_v() -> None:
         inp.union.ki.dwFlags = flags
         return inp
 
+    user32 = ctypes.windll.user32
+
+    # First, explicitly release any leftover hotkey modifiers (Shift, Alt, Space, Ctrl)
+    release_mods = (INPUT * 4)(
+        _make_key_input(VK_SHIFT, KEYEVENTF_KEYUP),
+        _make_key_input(VK_MENU, KEYEVENTF_KEYUP),
+        _make_key_input(VK_SPACE, KEYEVENTF_KEYUP),
+        _make_key_input(VK_CONTROL, KEYEVENTF_KEYUP),
+    )
+    user32.SendInput(4, ctypes.byref(release_mods), ctypes.sizeof(INPUT))
+    time.sleep(0.03)
+
     # Send Ctrl down, V down, V up, Ctrl up with micro-delays for Windows message queues
     ctrl_down = (INPUT * 1)(_make_key_input(VK_CONTROL))
     v_press = (INPUT * 2)(_make_key_input(VK_V), _make_key_input(VK_V, KEYEVENTF_KEYUP))
     ctrl_up = (INPUT * 1)(_make_key_input(VK_CONTROL, KEYEVENTF_KEYUP))
 
-    user32 = ctypes.windll.user32
     user32.SendInput(1, ctypes.byref(ctrl_down), ctypes.sizeof(INPUT))
     time.sleep(0.01)
     user32.SendInput(2, ctypes.byref(v_press), ctypes.sizeof(INPUT))
