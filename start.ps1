@@ -22,7 +22,7 @@ if ($running) {
 } else {
     Write-Host "[STARTING] Launching local llama-server on port 8081..." -ForegroundColor Yellow
     if (Test-Path "D:\llama4\llama-server.exe") {
-        Start-Process "D:\llama4\llama-server.exe" -ArgumentList "-m D:\llama4\qwen2.5-coder-7b.gguf --host 127.0.0.1 --port 8081 -c 16384 -ngl 99" -WindowStyle Minimized
+        Start-Process "D:\llama4\llama-server.exe" -ArgumentList "-m D:\llama4\qwen2.5-coder-7b.gguf --host 127.0.0.1 --port 8081 -c 2048 -ngl 99" -WindowStyle Minimized
         Write-Host "[OK] llama-server process started in background window." -ForegroundColor Green
         Start-Sleep -Seconds 3
     } else {

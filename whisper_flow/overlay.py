@@ -157,6 +157,20 @@ class OverlayNotifier:
         except Exception:  # noqa: BLE001
             pass
 
+        # On Windows, set WS_EX_NOACTIVATE so the floating HUD never steals focus from active apps/browser tabs
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetAncestor(root.winfo_id(), 2) or root.winfo_id()
+                GWL_EXSTYLE = -20
+                WS_EX_NOACTIVATE = 0x08000000
+                WS_EX_TOPMOST = 0x00000008
+                ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE | WS_EX_TOPMOST)
+            except Exception:  # noqa: BLE001
+                pass
+
         # Dark macOS Glass aesthetic
         bg_color = "#0b0d17"
         border_color = "#2a2e45"
@@ -310,6 +324,15 @@ class OverlayNotifier:
                         dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
                         _position()
                         root.deiconify()
+                        if sys.platform == "win32":
+                            try:
+                                import ctypes
+                                user32 = ctypes.windll.user32
+                                hwnd = user32.GetAncestor(root.winfo_id(), 2) or root.winfo_id()
+                                user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+                                user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
+                            except Exception:  # noqa: BLE001
+                                pass
                     elif msg_type == _MSG_HIDE:
                         phase[0] = "idle"
                         root.withdraw()

@@ -16,10 +16,10 @@ backend = "qwen3_asr"
 whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
 model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
 # Qwen3-ASR (primary STT engine)
-qwen3_asr_bin = 'D:\llama4\llama-mtmd-cli.exe'
+qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
 qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
 qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
-language = "en"
+language = "auto"
 threads = 8
 flash_attention = false
 
@@ -37,7 +37,7 @@ llama_cli_bin = 'D:\llama4\llama-cli.exe'
 model = 'C:\Users\Parth\.cache\huggingface\hub\models--unsloth--gemma-4-E4B-it-GGUF\snapshots\e1d90e5fb9f61d8dc71ef016580784a054e5c787\gemma-4-E4B-it-UD-Q4_K_XL.gguf'
 host = "127.0.0.1"
 port = 8081
-n_ctx = 32768
+n_ctx = 2048
 temperature = 0.3
 max_tokens = 2048
 top_p = 0.9

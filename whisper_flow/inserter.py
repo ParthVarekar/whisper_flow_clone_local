@@ -16,13 +16,13 @@ import threading
 _insertion_lock = threading.Lock()
 
 
-def insert_text(text: str) -> None:
+def insert_text(text: str, target_hwnd: int = 0) -> None:
     """Insert text at the active cursor position in the foreground application."""
     if not text:
         return
     with _insertion_lock:
         if sys.platform == "win32":
-            _insert_windows(text)
+            _insert_windows(text, target_hwnd=target_hwnd)
         else:
             _insert_fallback(text)
 
@@ -31,7 +31,7 @@ def insert_text(text: str) -> None:
 # Windows: ctypes-based clipboard + SendInput
 # ---------------------------------------------------------------------------
 
-def _insert_windows(text: str) -> None:
+def _insert_windows(text: str, target_hwnd: int = 0) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -74,6 +74,13 @@ def _insert_windows(text: str) -> None:
         _insert_fallback(text)
         return
 
+    # -- Restore target window focus if specified and not focused --
+    if target_hwnd and user32.IsWindow(target_hwnd):
+        fg = user32.GetForegroundWindow()
+        if fg != target_hwnd:
+            user32.SetForegroundWindow(target_hwnd)
+            time.sleep(0.04)
+
     # -- Simulate Ctrl+V --
     time.sleep(0.08)  # Delay for clipboard to settle
     _send_ctrl_v()
@@ -81,8 +88,9 @@ def _insert_windows(text: str) -> None:
 
 
 def _send_ctrl_v() -> None:
-    """Simulate Ctrl+V keystroke using Windows SendInput."""
+    """Simulate Ctrl+V keystroke using Windows keybd_event."""
     import ctypes
+    user32 = ctypes.windll.user32
 
     VK_SHIFT = 0x10
     VK_CONTROL = 0x11
@@ -90,97 +98,47 @@ def _send_ctrl_v() -> None:
     VK_SPACE = 0x20
     VK_V = 0x56
     KEYEVENTF_KEYUP = 0x0002
-    INPUT_KEYBOARD = 1
 
-    class KEYBDINPUT(ctypes.Structure):
-        _fields_ = [
-            ("wVk", ctypes.c_ushort),
-            ("wScan", ctypes.c_ushort),
-            ("dwFlags", ctypes.c_ulong),
-            ("time", ctypes.c_ulong),
-            ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-        ]
+    # Release leftover hotkey modifiers (Shift, Alt, Space, Ctrl)
+    for vk in (VK_SHIFT, VK_MENU, VK_SPACE, VK_CONTROL):
+        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.02)
 
-    class INPUT(ctypes.Structure):
-        class _INPUT_UNION(ctypes.Union):
-            _fields_ = [("ki", KEYBDINPUT)]
-        _fields_ = [
-            ("type", ctypes.c_ulong),
-            ("union", _INPUT_UNION),
-        ]
-
-    def _make_key_input(vk: int, flags: int = 0) -> INPUT:
-        inp = INPUT()
-        inp.type = INPUT_KEYBOARD
-        inp.union.ki.wVk = vk
-        inp.union.ki.dwFlags = flags
-        return inp
-
-    user32 = ctypes.windll.user32
-
-    # First, explicitly release any leftover hotkey modifiers (Shift, Alt, Space, Ctrl)
-    release_mods = (INPUT * 4)(
-        _make_key_input(VK_SHIFT, KEYEVENTF_KEYUP),
-        _make_key_input(VK_MENU, KEYEVENTF_KEYUP),
-        _make_key_input(VK_SPACE, KEYEVENTF_KEYUP),
-        _make_key_input(VK_CONTROL, KEYEVENTF_KEYUP),
-    )
-    user32.SendInput(4, ctypes.byref(release_mods), ctypes.sizeof(INPUT))
-    time.sleep(0.03)
-
-    # Send Ctrl down, V down, V up, Ctrl up with micro-delays for Windows message queues
-    ctrl_down = (INPUT * 1)(_make_key_input(VK_CONTROL))
-    v_press = (INPUT * 2)(_make_key_input(VK_V), _make_key_input(VK_V, KEYEVENTF_KEYUP))
-    ctrl_up = (INPUT * 1)(_make_key_input(VK_CONTROL, KEYEVENTF_KEYUP))
-
-    user32.SendInput(1, ctypes.byref(ctrl_down), ctypes.sizeof(INPUT))
+    # Send Ctrl down, V down, V up, Ctrl up
+    user32.keybd_event(VK_CONTROL, 0, 0, 0)
     time.sleep(0.01)
-    user32.SendInput(2, ctypes.byref(v_press), ctypes.sizeof(INPUT))
+    user32.keybd_event(VK_V, 0, 0, 0)
     time.sleep(0.01)
-    user32.SendInput(1, ctypes.byref(ctrl_up), ctypes.sizeof(INPUT))
+    user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.01)
+    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 
 
 def _send_ctrl_c() -> None:
     """Simulate Ctrl+C keystroke to copy selected text."""
     import ctypes
+    user32 = ctypes.windll.user32
 
+    VK_SHIFT = 0x10
     VK_CONTROL = 0x11
+    VK_MENU = 0x12
+    VK_SPACE = 0x20
     VK_C = 0x43
     KEYEVENTF_KEYUP = 0x0002
-    INPUT_KEYBOARD = 1
 
-    class KEYBDINPUT(ctypes.Structure):
-        _fields_ = [
-            ("wVk", ctypes.c_ushort),
-            ("wScan", ctypes.c_ushort),
-            ("dwFlags", ctypes.c_ulong),
-            ("time", ctypes.c_ulong),
-            ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-        ]
+    # Release leftover hotkey modifiers
+    for vk in (VK_SHIFT, VK_MENU, VK_SPACE):
+        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.02)
 
-    class INPUT(ctypes.Structure):
-        class _INPUT_UNION(ctypes.Union):
-            _fields_ = [("ki", KEYBDINPUT)]
-        _fields_ = [
-            ("type", ctypes.c_ulong),
-            ("union", _INPUT_UNION),
-        ]
-
-    def _make_key_input(vk: int, flags: int = 0) -> INPUT:
-        inp = INPUT()
-        inp.type = INPUT_KEYBOARD
-        inp.union.ki.wVk = vk
-        inp.union.ki.dwFlags = flags
-        return inp
-
-    inputs = (INPUT * 4)(
-        _make_key_input(VK_CONTROL),
-        _make_key_input(VK_C),
-        _make_key_input(VK_C, KEYEVENTF_KEYUP),
-        _make_key_input(VK_CONTROL, KEYEVENTF_KEYUP),
-    )
-
-    ctypes.windll.user32.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+    # Send Ctrl down, C down, C up, Ctrl up
+    user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    time.sleep(0.01)
+    user32.keybd_event(VK_C, 0, 0, 0)
+    time.sleep(0.01)
+    user32.keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.01)
+    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 
 
 def get_selected_text() -> str:

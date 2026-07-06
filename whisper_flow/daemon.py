@@ -165,6 +165,10 @@ class Daemon:
             self._recording = True
             self._record_start_time = time.monotonic()
 
+        if sys.platform == "win32":
+            import ctypes
+            self._target_hwnd = ctypes.windll.user32.GetForegroundWindow()
+
         sys.stderr.write("[whisper-flow] recording started\n")
         self._overlay.show("Listening...")
         if self._tray:
@@ -369,7 +373,7 @@ class Daemon:
             processed = _clean_llm_output(processed)
 
             # Insert at cursor
-            insert_text(processed)
+            insert_text(processed, target_hwnd=getattr(self, "_target_hwnd", 0))
 
             # Display result in floating overlay HUD
             self._overlay.show_result(processed)

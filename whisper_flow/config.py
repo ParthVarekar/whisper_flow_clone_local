@@ -66,10 +66,10 @@ class TranscriptionConfig:
     vad_min_silence_ms: int = 0  # -vsd; 0 = whisper.cpp default
     vad_max_speech_s: int = 0    # -vmsd; 0 = whisper.cpp default (no cap)
     vad_speech_pad_ms: int = 0   # -vp; 0 = whisper.cpp default
-    # Qwen3-ASR: multimodal speech-LLM via llama-mtmd-cli
-    qwen3_asr_bin: str = ""      # path to llama-mtmd-cli(.exe)
+    # Qwen3-ASR: multimodal speech-LLM via CrispASR / llama.cpp
+    qwen3_asr_bin: str = ""      # path to crispasr(.exe) / llama-mtmd-cli
     qwen3_asr_model: str = ""    # path to Qwen3-ASR-*.gguf
-    qwen3_asr_mmproj: str = ""   # path to mmproj-Qwen3-ASR-*.gguf
+    qwen3_asr_mmproj: str = ""   # path to mmproj-Qwen3-ASR-*.gguf (optional for CrispASR)
 
 
 @dataclass

@@ -43,12 +43,12 @@ class Qwen3AsrBackend(TranscriptionBackend):
         if not bin_path:
             raise ConfigError(
                 "transcription.qwen3_asr_bin is not set; "
-                "set it to the path of llama-mtmd-cli.exe"
+                "set it to the path of crispasr.exe / llama-mtmd-cli.exe"
             )
         if shutil.which(bin_path) is None and not os.path.isfile(bin_path):
             raise BinaryNotFoundError(
                 bin_path,
-                "download llama.cpp release or build from source, "
+                "download CrispASR / llama.cpp release or build from source, "
                 "and set transcription.qwen3_asr_bin in config",
             )
         model = self.cfg.qwen3_asr_model
@@ -57,12 +57,7 @@ class Qwen3AsrBackend(TranscriptionBackend):
         if not os.path.isfile(model):
             raise ModelNotFoundError(model, kind="Qwen3-ASR GGUF model")
         mmproj = self.cfg.qwen3_asr_mmproj
-        if not mmproj:
-            raise ConfigError(
-                "transcription.qwen3_asr_mmproj is not set; "
-                "set it to the path of mmproj-Qwen3-ASR-*.gguf"
-            )
-        if not os.path.isfile(mmproj):
+        if mmproj and not os.path.isfile(mmproj):
             raise ModelNotFoundError(mmproj, kind="Qwen3-ASR mmproj")
 
     # -- cancel --------------------------------------------------------------
@@ -85,6 +80,24 @@ class Qwen3AsrBackend(TranscriptionBackend):
 
     def _build_cmd(self, audio_path: str, *, initial_prompt: str = "") -> list[str]:
         c = self.cfg
+        is_crispasr = "crispasr" in os.path.basename(c.qwen3_asr_bin).lower()
+
+        if is_crispasr:
+            cmd = [
+                c.qwen3_asr_bin,
+                "-m", c.qwen3_asr_model,
+            ]
+            if c.language and c.language.lower() != "auto":
+                cmd.extend(["-l", c.language])
+            cmd.extend(["-t", str(c.threads)])
+            cmd.extend(["-bs", "5"])
+            cmd.extend(["-nt", "-np"])
+            if initial_prompt:
+                cmd.extend(["--hotwords", initial_prompt])
+            cmd.append(audio_path)
+            return cmd
+
+        # Fallback for llama-mtmd-cli
         cmd = [
             c.qwen3_asr_bin,
             "-m", c.qwen3_asr_model,
@@ -135,7 +148,7 @@ class Qwen3AsrBackend(TranscriptionBackend):
             except FileNotFoundError as exc:
                 raise BinaryNotFoundError(
                     self.cfg.qwen3_asr_bin,
-                    "llama-mtmd-cli not found at configured path",
+                    "Qwen3-ASR binary (crispasr / llama-mtmd-cli) not found at configured path",
                 ) from exc
 
             stdout_lines = []
@@ -172,7 +185,7 @@ class Qwen3AsrBackend(TranscriptionBackend):
             if rc != 0:
                 err_text = "\n".join(stderr_lines[-10:]) if stderr_lines else "(no stderr)"
                 raise TranscriptionError(
-                    f"llama-mtmd-cli exited with code {rc}: {err_text}"
+                    f"Qwen3-ASR binary exited with code {rc}: {err_text}"
                 )
 
             # Parse output — Qwen3-ASR outputs plain text (may include system tokens)
