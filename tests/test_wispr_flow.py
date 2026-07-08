@@ -171,13 +171,14 @@ def test_auto_intent_detection():
 
 
 def test_auto_mode_alias():
-    """Test that mind_reader resolves to auto and auto is a valid mode."""
-    from whisper_flow.prompts import resolve_mode, VALID_MODES
+    """Test that mind_reader and auto resolve to a valid prompt mode."""
+    from whisper_flow.prompts import resolve_mode, VALID_MODES, SYSTEM_PROMPTS
 
-    assert resolve_mode("mind_reader") == "auto"
-    assert resolve_mode("auto") == "auto"
-    assert "auto" in VALID_MODES
+    # C3 FIX: mind_reader and auto both resolve to 'medium' (a valid mode with a prompt)
+    assert resolve_mode("mind_reader") == "medium"
+    assert resolve_mode("auto") == "medium"
     assert "mind_reader" in VALID_MODES
+    assert "medium" in SYSTEM_PROMPTS
 
 
 def test_context_vocabulary_injection():

@@ -41,7 +41,7 @@ def _add_common_transcription_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--language", help="spoken language (e.g. en, fr, auto)")
     p.add_argument("--whisper-model", "--stt-model", help="path to ggml Whisper .bin model")
     p.add_argument("--whisper-bin", help="path to whisper-cli binary")
-    p.add_argument("--translate", action="store_true", help="translate to English")
+    p.add_argument("--translate", action="store_true", default=argparse.SUPPRESS, help="translate to English")
     p.add_argument("--threads", type=int, help="CPU threads for whisper.cpp")
     p.add_argument("--gpu", choices=["auto", "cpu", "cuda", "metal", "vulkan"],
                    help="GPU/backend hint (whisper.cpp: build-time; llama.cpp: -ngl)")
@@ -49,7 +49,7 @@ def _add_common_transcription_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--mic-device", help="mic device (Linux: ALSA/Pulse 'default'; macOS: avfoundation 'default'; Windows: dshow device name)")
     p.add_argument("--mic-backend", choices=["auto", "arecord", "ffmpeg", "sounddevice"], help="mic capture backend")
     # VAD (whisper-cli native Silero VAD, cli.cpp:1248-1256)
-    p.add_argument("--vad", action="store_true", help="enable Silero VAD (skips silence; requires --vad-model)")
+    p.add_argument("--vad", action="store_true", default=argparse.SUPPRESS, help="enable Silero VAD (skips silence; requires --vad-model)")
     p.add_argument("--vad-model", help="path to ggml-silero-v*.bin (run scripts/download_models.sh --vad)")
     p.add_argument("--vad-threshold", type=float, help="VAD speech probability threshold 0..1 (default 0.5)")
     p.add_argument("--vad-min-silence-ms", type=int, help="min silence to split segments (ms)")
@@ -73,7 +73,7 @@ def _add_common_llm_opts(p: argparse.ArgumentParser) -> None:
 def _add_output_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--output-format", "--format", choices=["text", "json", "srt", "vtt", "all"],
                    help="output format")
-    p.add_argument("--write-files", action="store_true",
+    p.add_argument("--write-files", action="store_true", default=argparse.SUPPRESS,
                    help="write transcript files next to source / in --out-dir")
     p.add_argument("--out-dir", help="directory for written transcript files")
     p.add_argument("--json", action="store_true",
@@ -81,11 +81,11 @@ def _add_output_opts(p: argparse.ArgumentParser) -> None:
 
 
 def _add_notifier_opts(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--no-gui", action="store_true",
+    p.add_argument("--no-gui", action="store_true", default=argparse.SUPPRESS,
                    help="disable the live GUI progress window (console output only)")
-    p.add_argument("--gui", action="store_true",
+    p.add_argument("--gui", action="store_true", default=argparse.SUPPRESS,
                    help="force the GUI progress window even if no display is detected")
-    p.add_argument("--notify", action="store_true",
+    p.add_argument("--notify", action="store_true", default=argparse.SUPPRESS,
                    help="also fire desktop notifications (notify-send) on start/done/error")
 
 
@@ -99,11 +99,23 @@ def _build_notifier(args: argparse.Namespace, *, verbose: bool, initial_mode: st
 
 
 def _overrides_from_args(args: argparse.Namespace) -> dict:
-    """Map CLI args to dotted config overrides (None values skipped by load_config)."""
+    """Map CLI args to dotted config overrides.
+
+    C6 FIX: None values are skipped (attribute not set via argparse.SUPPRESS).
+    False values for store_true flags are also skipped so that config-file
+    True settings survive when the flag isn't explicitly passed on the CLI.
+    """
     o: dict = {}
+    _BOOL_FLAGS = frozenset({
+        "transcription.translate", "transcription.vad",
+        "output.write_files", "verbose",
+    })
     def put(key, val):
-        if val is not None:
-            o[key] = val
+        if val is None:
+            return
+        if key in _BOOL_FLAGS and val is False:
+            return
+        o[key] = val
 
     put("transcription.language", getattr(args, "language", None))
     put("transcription.model", getattr(args, "whisper_model", None))
@@ -417,7 +429,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--config", help="path to JSON config file")
     p.add_argument("--version", action="version", version=f"whisper-flow {__version__}")
-    p.add_argument("-v", "--verbose", action="store_true", help="verbose logging to stderr")
+    p.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS, help="verbose logging to stderr")
 
     # Parent parser so --config / --verbose work both before AND after the subcommand.
     parent = argparse.ArgumentParser(add_help=False)

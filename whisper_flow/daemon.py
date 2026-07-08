@@ -430,7 +430,8 @@ class Daemon:
 
         # Grab selected text via Ctrl+C copy
         try:
-            from .inserter import copy_selected_text
+            # C2 FIX: inserter.py defines get_selected_text, not copy_selected_text
+            from .inserter import get_selected_text as copy_selected_text
             self._command_selected_text = copy_selected_text()
         except Exception:  # noqa: BLE001
             self._command_selected_text = ""

@@ -79,6 +79,9 @@ def write_outputs(result: TranscriptionResult, cfg: Config, *, source_name: str)
     os.makedirs(out_dir, exist_ok=True)
     base = os.path.splitext(os.path.basename(source_name))[0] or "transcript"
     fmt = cfg.output.format
+    # C7 FIX: map "text" → "txt" so --format text --write-files actually writes a file
+    if fmt == "text":
+        fmt = "txt"
     formats = ["txt", "json", "srt", "vtt"] if fmt == "all" else [fmt]
     for f in formats:
         path = os.path.join(out_dir, f"{base}.{f}")

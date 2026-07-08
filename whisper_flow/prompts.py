@@ -97,12 +97,13 @@ ALIASES = {
     "dev": "coding",
     "notes": "meeting_notes",
     "tweet": "social",
-    "mind_reader": "auto",
+    "mind_reader": "medium",
+    "auto": "medium",
 }
 
 VALID_MODES = {"summarize", "correct", "polish", "medium", "smart_list", "email",
                "coding", "meeting_notes", "social", "command", "assistant", "raw",
-               "auto", "mind_reader",
+               "mind_reader",
                "none", "light", "high", "summary", "bullets", "list", "dev", "notes", "tweet"}
 
 
@@ -145,5 +146,7 @@ def build_prompt(mode: str, transcript: str, *,
     if context_blocks:
         system += "\n\nContextual Intelligence:\n" + "\n".join(context_blocks)
 
-    user = USER_TEMPLATES[mode].format(transcript=transcript)
+    # C4 FIX: use str.replace instead of str.format to avoid KeyError/IndexError
+    # when the transcript contains literal braces (e.g. JSON, code, {value}).
+    user = USER_TEMPLATES[mode].replace("{transcript}", transcript)
     return system, user

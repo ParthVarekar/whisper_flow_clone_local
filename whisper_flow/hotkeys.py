@@ -182,12 +182,18 @@ class HotkeyManager:
         name = _key_to_name(key)
         self._pressed_keys.add(name)
 
+        # C1 FIX: check trigger using both bare name and Key. prefix.
+        # _key_to_name returns "t" for letter keys but "Key.space" for special keys.
+        # The old code only checked f"Key.{trigger}" which never matched letters.
+        dict_trigger_names = {self._dict_trigger, f"Key.{self._dict_trigger}"}
+        cmd_trigger_names = {self._cmd_trigger, f"Key.{self._cmd_trigger}"}
+
         # -- Dictation hotkey press --
         if (
             not self._dict_held
             and not self._cmd_held
             and self._modifiers_held(self._dict_mods)
-            and f"Key.{self._dict_trigger}" in self._pressed_keys
+            and not self._pressed_keys.isdisjoint(dict_trigger_names)
         ):
             now = time.monotonic()
             gap = now - self._last_dict_tap
@@ -209,7 +215,7 @@ class HotkeyManager:
             not self._cmd_held
             and not self._dict_held
             and self._modifiers_held(self._cmd_mods)
-            and f"Key.{self._cmd_trigger}" in self._pressed_keys
+            and not self._pressed_keys.isdisjoint(cmd_trigger_names)
         ):
             self._cmd_held = True
             if self._on_cmd_start:
@@ -222,15 +228,16 @@ class HotkeyManager:
         self._pressed_keys.discard(name)
 
         # -- Dictation hotkey release --
-        trigger_name = f"Key.{self._dict_trigger}"
-        if self._dict_held and (name == trigger_name or not self._modifiers_held(self._dict_mods)):
+        # C1 FIX: check both bare name and Key. prefix for release too
+        dict_trigger_names = {self._dict_trigger, f"Key.{self._dict_trigger}"}
+        if self._dict_held and (name in dict_trigger_names or not self._modifiers_held(self._dict_mods)):
             self._dict_held = False
             if self._on_dict_stop:
                 _safe_call(self._on_dict_stop)
 
         # -- Command hotkey release --
-        cmd_trigger_name = f"Key.{self._cmd_trigger}"
-        if self._cmd_held and (name == cmd_trigger_name or not self._modifiers_held(self._cmd_mods)):
+        cmd_trigger_names = {self._cmd_trigger, f"Key.{self._cmd_trigger}"}
+        if self._cmd_held and (name in cmd_trigger_names or not self._modifiers_held(self._cmd_mods)):
             self._cmd_held = False
             if self._on_cmd_stop:
                 _safe_call(self._on_cmd_stop)

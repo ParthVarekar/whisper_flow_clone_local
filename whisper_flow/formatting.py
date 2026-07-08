@@ -69,26 +69,38 @@ def _apply_punctuation_words(text: str) -> str:
 
 
 def _apply_backtrack(text: str) -> str:
+    # H10 FIX: backtrack should remove the PRIOR sentence, not just edit
+    # the current one. "I went to the store. Actually I went to the market."
+    # should become "I went to the market."
     sentences = re.split(r"([.!?]\s+)", text)
     rebuilt: list[str] = []
-    for part in sentences:
+    skip_next_sentence = False
+    for i, part in enumerate(sentences):
         lowered = part.lower()
         marker = next((m for m in _BACKTRACK_MARKERS if m in lowered), "")
-        if not marker:
-            rebuilt.append(part)
+        if marker:
+            idx = lowered.find(marker)
+            suffix = part[idx + len(marker):].strip(" ,")
+            # Remove the last appended sentence (the one being corrected)
+            if rebuilt:
+                while rebuilt and not rebuilt[-1].strip():
+                    rebuilt.pop()
+                if rebuilt:
+                    rebuilt.pop()
+            if len(suffix.split()) >= 1:
+                rebuilt.append(suffix)
             continue
-        idx = lowered.find(marker)
-        suffix = part[idx + len(marker):].strip(" ,")
-        prefix = part[:idx].strip(" ,")
-        if len(suffix.split()) >= 2:
-            rebuilt.append(suffix)
-        else:
-            rebuilt.append(prefix)
+        if skip_next_sentence:
+            skip_next_sentence = False
+            continue
+        rebuilt.append(part)
     return "".join(rebuilt)
 
 
 def _apply_press_enter(text: str) -> str:
-    out = re.sub(r"\bpress enter\b$", "", text, flags=re.IGNORECASE).rstrip()
+    # H12 FIX: remove ALL occurrences of "press enter", not just at end
+    out = re.sub(r"\bpress enter\b", "", text, flags=re.IGNORECASE)
+    out = out.rstrip()
     if out != text.rstrip():
         return out + "\n"
     return text
@@ -101,6 +113,10 @@ def _normalize_spacing(text: str) -> str:
     out = re.sub(r"[ \t]{2,}", " ", out)
     out = re.sub(r"\s+([,.;:!?])", r"\1", out)
     out = re.sub(r"([,.;:!?])(?=[^\s\n])", r"\1 ", out)
+    # H11 FIX: undo the auto-space for decimals (1.5, 3.14) and common abbreviations
+    # (e.g., i.e., Mr., Dr., etc.)
+    out = re.sub(r"(\d)\. (\d)", r"\1.\2", out)  # fix decimals: 1. 5 → 1.5
+    out = re.sub(r"\b([ei])\. ([ge])\.", r"\1.\2.", out)  # e. g. → e.g., i. e. → i.e.
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip()
 

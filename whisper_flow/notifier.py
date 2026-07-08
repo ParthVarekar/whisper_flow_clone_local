@@ -90,8 +90,11 @@ class NullNotifier:
         self._cancel_cb = cb
 
     def register_start(self, cb: Callable[[], None]) -> None:
+        # C5 FIX: do NOT call cb() immediately — store it for later.
+        # The pipeline creates _start_evt AFTER register_start is called,
+        # so firing immediately means the event is never set and headless
+        # --duration 0 hangs forever. TkNotifier already stores without firing.
         self._start_cb = cb
-        cb()
 
     def result(self, kind: str, text: str) -> None:
         if self.verbose and text:
