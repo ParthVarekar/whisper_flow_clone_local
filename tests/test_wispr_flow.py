@@ -178,7 +178,6 @@ def test_auto_mode_alias():
     assert resolve_mode("mind_reader") == "medium"
     assert resolve_mode("auto") == "medium"
     assert "mind_reader" in VALID_MODES
-    # The resolved mode must have a prompt defined (no more crashes)
     assert "medium" in SYSTEM_PROMPTS
 
 

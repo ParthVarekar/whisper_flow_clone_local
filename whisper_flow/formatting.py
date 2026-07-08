@@ -83,11 +83,10 @@ def _apply_backtrack(text: str) -> str:
             suffix = part[idx + len(marker):].strip(" ,")
             # Remove the last appended sentence (the one being corrected)
             if rebuilt:
-                # Remove the sentence text + its trailing punctuation
                 while rebuilt and not rebuilt[-1].strip():
                     rebuilt.pop()
                 if rebuilt:
-                    rebuilt.pop()  # remove the sentence being corrected
+                    rebuilt.pop()
             if len(suffix.split()) >= 1:
                 rebuilt.append(suffix)
             continue

@@ -33,10 +33,6 @@ from .pipeline import Pipeline
 # Argument helpers
 # ---------------------------------------------------------------------------
 
-# C6 FIX: store_true flags use SUPPRESS so that absent flags don't
-# produce False values that override config-file True settings.
-_STORE_TRUE_DEFAULT = '__not_set__'
-
 def _add_common_transcription_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("-f", "--file", help="audio file to transcribe")
     p.add_argument("--mic", action="store_true", help="use microphone input instead of a file")
@@ -110,7 +106,6 @@ def _overrides_from_args(args: argparse.Namespace) -> dict:
     True settings survive when the flag isn't explicitly passed on the CLI.
     """
     o: dict = {}
-    # These keys correspond to store_true flags — only override if True
     _BOOL_FLAGS = frozenset({
         "transcription.translate", "transcription.vad",
         "output.write_files", "verbose",
@@ -118,7 +113,6 @@ def _overrides_from_args(args: argparse.Namespace) -> dict:
     def put(key, val):
         if val is None:
             return
-        # C6 FIX: skip False for store_true flags — don't clobber config True
         if key in _BOOL_FLAGS and val is False:
             return
         o[key] = val
@@ -153,6 +147,9 @@ def _overrides_from_args(args: argparse.Namespace) -> dict:
     put("mode", getattr(args, "mode", None))
     put("verbose", getattr(args, "verbose", None))
     return o
+
+
+def _resolve_input(args: argparse.Namespace) -> tuple[Optional[str], bool]:
     """Return (file_path, use_mic). Validates exactly one input source."""
     use_mic = bool(getattr(args, "mic", False))
     file_path = getattr(args, "file", None)
