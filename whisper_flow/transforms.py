@@ -90,20 +90,21 @@ def build_transform_prompt(
     instr_lower = voice_instruction.strip().lower()
     for name, tmpl in BUILTIN_TRANSFORMS.items():
         if name in instr_lower or instr_lower.startswith(name):
+            # C8 FIX: use str.replace instead of str.format
             return (
                 tmpl["system"],
-                tmpl["user"].format(selected=selected_text),
+                tmpl["user"].replace("{selected}", selected_text),
             )
 
     # Check custom transforms
     if custom_transforms:
         for name, tmpl in custom_transforms.items():
             if name.lower() in instr_lower:
+                # C8 FIX: use str.replace instead of str.format
+                user_tmpl = tmpl.get("user", "Text:\n\"\"\"\n{selected}\n\"\"\"\n\n{instruction}")
                 return (
                     tmpl.get("system", "You are a helpful writing assistant. Output only the result."),
-                    tmpl.get("user", "Text:\n\"\"\"\n{selected}\n\"\"\"\n\n{instruction}").format(
-                        selected=selected_text, instruction=voice_instruction
-                    ),
+                    user_tmpl.replace("{selected}", selected_text).replace("{instruction}", voice_instruction),
                 )
 
     # Check explicit transform_name
@@ -111,11 +112,15 @@ def build_transform_prompt(
         all_transforms = {**BUILTIN_TRANSFORMS}
         if custom_transforms:
             all_transforms.update(custom_transforms)
-        tmpl = all_transforms.get(transform_name)
+        # C8 FIX: case-insensitive lookup
+        tmpl = all_transforms.get(transform_name) or all_transforms.get(transform_name.lower())
         if tmpl:
+            # C8 FIX: use str.replace instead of str.format to avoid KeyError
+            # when the template uses {instruction} or other placeholders.
+            user = tmpl["user"].replace("{selected}", selected_text).replace("{instruction}", voice_instruction)
             return (
                 tmpl["system"],
-                tmpl["user"].format(selected=selected_text),
+                user,
             )
 
     # Free-form: use voice instruction as the editing command

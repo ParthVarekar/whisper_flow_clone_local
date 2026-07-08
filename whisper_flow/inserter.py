@@ -3,8 +3,10 @@
 On Windows, uses ctypes SendInput to simulate Ctrl+V after placing text on
 the clipboard. Falls back to pyperclip + pyautogui if available.
 
-The clipboard is saved/restored around each insertion so the user's clipboard
-is not clobbered.
+NOTE: The clipboard is NOT saved/restored around insertion — the dictated
+text remains on the clipboard for re-paste. This is intentional (matching
+Wispr Flow behavior). If clipboard preservation is needed in the future,
+add save/restore logic around the EmptyClipboard/SetClipboardData calls.
 """
 
 from __future__ import annotations
@@ -193,6 +195,10 @@ def get_selected_text() -> str:
         selected = ""  # Nothing was selected
 
     return selected.strip()
+
+
+# C2 FIX: alias for backward compat — daemon.py imports copy_selected_text
+copy_selected_text = get_selected_text
 
 
 # ---------------------------------------------------------------------------

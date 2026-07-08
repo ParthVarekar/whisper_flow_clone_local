@@ -165,8 +165,10 @@ class Handler(BaseHTTPRequestHandler):
                                 "correct", "polish", "command", "assistant", "raw"):
                     self._send_json(400, {"error": f"invalid mode: {mode!r}"})
                     return
-                cfg.mode = mode
-                result = pipe.run_file(upath)
+                # C9 FIX: use per-request config copy to avoid race condition
+                import dataclasses
+                req_cfg = dataclasses.replace(cfg, mode=mode)
+                result = Pipeline(req_cfg).run_file(upath)
                 result.pop("source", None)
                 self._send_json(200, result)
 
@@ -187,9 +189,11 @@ class Handler(BaseHTTPRequestHandler):
                         "correct", "polish", "command", "assistant", "raw"):
             self._send_json(400, {"error": f"invalid mode: {mode!r}"})
             return
-        cfg.mode = mode
+        # C9 FIX: use per-request config copy to avoid race condition
+        import dataclasses
+        req_cfg = dataclasses.replace(cfg, mode=mode)
         try:
-            processed = Pipeline(cfg).process(text)
+            processed = Pipeline(req_cfg).process(text)
         except WhisperFlowError as exc:
             self._send_json(400, {"error": render_error(exc)})
             return
