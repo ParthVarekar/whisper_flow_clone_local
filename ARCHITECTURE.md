@@ -101,7 +101,7 @@ correct and stable. A single-llama.cpp pipeline would only be preferable for
 - **`pipeline.py`** depends only on the ABCs and `audio.py`.
 - **`cli.py` / `server.py`** depend only on `pipeline.py` + `config.py`.
 
-## Why subprocess + HTTP (not Python bindings)
+## Why subprocess + HTTP (not Python bindings)?
 
 - **Minimal dependencies**: the orchestrator is Python stdlib-only. No
   `llama-cpp-python`, `whisper-cpp-python`, torch, or ctypes ABI risk.
