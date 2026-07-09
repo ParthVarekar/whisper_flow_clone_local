@@ -14,12 +14,17 @@ model Note {
   title       String
   body        String
   rawTranscript String? // verbatim STT output before LLM polish
-  type        String   @default("journal") // idea | task | reference | question | journal | dictation
-  tags        String   @default("") // comma-separated for simplicity
-  vaultPath   String?  // relative path in ~/SecondBrain/
+  type        String   @default("journal") // idea | task | reference | question | journal | dictation | uncategorized
+  tags        String   @default("") // comma-separated (controlled vocab + free-form)
+  vaultPath   String?  // relative path in ~/SecondBrain/ (future: markdown vault)
   source      String   @default("voice") // voice | text | dictation | import
   appContext  String?  // what app was focused when captured
-  confidence  Float    @default(0.0) // LLM classification confidence
+  confidence  Float    @default(0.0) // LLM classification confidence (0.0-1.0)
+  // Review loop (Phase B): an inbox note becomes "processed" after the user
+  // reviews it in the daily review screen. Archived notes are hidden from the
+  // timeline but kept for search.
+  status      String   @default("inbox") // inbox | processed | archived
+  reviewedAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -28,6 +33,7 @@ model Note {
   backlinks   Link[]   @relation("Incoming")
 
   @@index([type])
+  @@index([status])
   @@index([createdAt])
 }
 
@@ -50,9 +56,10 @@ model Link {
   source    Note    @relation("Outgoing", fields: [sourceId], references: [id], onDelete: Cascade)
   targetId  String?
   target    Note?   @relation("Incoming", fields: [targetId], references: [id], onDelete: Cascade)
-  similarity Float  @default(0.0) // cosine similarity for auto-links
-  type      String  @default("semantic") // semantic | wikilink | tag
+  similarity Float  @default(0.0) // 0-1; cosine for semantic, overlap ratio for keyword
+  type      String  @default("keyword") // keyword | semantic | wikilink | tag
 
   @@index([sourceId])
   @@index([targetId])
+  @@index([type])
 }
