@@ -14,12 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "whisper-flow — speech to text",
-  description: "Browser-based speech-to-text powered by the Web Speech API. Fully client-side, no server endpoint.",
-  keywords: ["whisper", "speech-to-text", "STT", "Web Speech API", "transcription"],
-  authors: [{ name: "whisper-flow" }],
+  title: "Second Brain — your spare brain remembers",
+  description: "Capture spoken thoughts, auto-organize them with AI, and ask your brain questions later. A local-first second brain.",
+  keywords: ["second brain", "PKM", "voice notes", "AI notes", "personal knowledge management"],
+  authors: [{ name: "Second Brain" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
   },
 };
 
