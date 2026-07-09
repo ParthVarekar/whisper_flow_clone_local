@@ -21,7 +21,22 @@ demo/*.wav
 demo/*.mp3
 demo/*.m4a
 
+# secrets / local env
+.env
+.env.*
+!.env.example
+
+# local database
+*.db
+*.db-journal
+second-brain/db/
+
+# build output
+.next/
+out/
+
 # os / editor
 .DS_Store
 .idea/
 .vscode/
+next-env.d.ts

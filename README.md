@@ -22,7 +22,7 @@ that drives the two official C++ backends via subprocess + HTTP.
 
 ---
 
-## Why this architecture
+## Why this architecture ?
 
 **whisper.cpp (STT) + llama.cpp (LLM)** is the correct local architecture today.
 llama.cpp does **not** support Whisper transcription — its audio support is for

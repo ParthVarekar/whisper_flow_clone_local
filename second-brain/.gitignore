@@ -1,0 +1,15 @@
+node_modules/
+.next/
+db/*.db
+db/*.db-journal
+dev.log
+*.tar.gz
+__pycache__/
+.pytest_cache/
+upload/
+skills/
+archive/
+examples/
+download/
+tool-results/
+*.log
