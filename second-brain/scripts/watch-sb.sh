@@ -11,8 +11,11 @@ DIR=/home/z/whisper_flow_clone/second-brain
 start_dev() {
   cd "$DIR"
   # Run next dev directly (not via bun run dev, which uses a tee pipe that
-  # breaks when the parent shell exits).
-  nohup ./node_modules/.bin/next dev -p 3000 > "$LOG" 2>&1 &
+  # breaks when the parent shell exits). Explicitly set DATABASE_URL so the
+  # server reads from the second-brain's own DB (the sandbox shell may have
+  # a stale DATABASE_URL pointing at the parent project's DB).
+  DATABASE_URL="file:/home/z/whisper_flow_clone/second-brain/db/second-brain.db" \
+    nohup ./node_modules/.bin/next dev -p 3000 > "$LOG" 2>&1 &
   echo $! > "$PIDFILE"
   echo "[watcher] second-brain dev started (PID $!)"
 }
