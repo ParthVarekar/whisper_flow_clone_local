@@ -6,7 +6,7 @@
 Python stdlib-only CLI. The two backends are separate processes driven by the
 orchestrator (subprocess for `whisper-cli`, HTTP for `llama-server`).
 
-## Why this is the correct architecture (verified upstream)
+## Why this is the correct architecture (verified upstream!)
 
 ### 1. llama.cpp has no Whisper transcription
 
