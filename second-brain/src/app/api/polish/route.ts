@@ -93,24 +93,10 @@ export async function POST(request: Request) {
   userContent += `\n\nRAW_TRANSCRIPTION:\n<<<RAW_TRANSCRIPTION\n${raw}\nRAW_TRANSCRIPTION`
 
   try {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default
-    const zai = await ZAI.create()
-
-    const completion = await Promise.race([
-      zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-        thinking: { type: 'disabled' },
-        temperature: 0.0,
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('LLM timed out')), 20000)
-      ),
-    ]) as any
-
-    let polished = (completion.choices[0]?.message?.content || '').trim()
+    const { chat } = await import('@/lib/llm')
+    // A1: system prompt now sent as role:'system' (was 'assistant')
+    const polishedRaw = await chat(systemPrompt, userContent, { temperature: 0.0, timeoutMs: 20_000 })
+    let polished = polishedRaw.trim()
     let warning: string | undefined
 
     if (polished === 'EMPTY' || !polished) {
