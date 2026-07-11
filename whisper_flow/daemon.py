@@ -310,6 +310,19 @@ class Daemon:
             capture.close()
             self._capture = None
 
+            # Preprocess audio for better ASR accuracy:
+            # - Trim leading/trailing silence (reduces hallucination risk)
+            # - Noise gate (removes constant background noise: fans, AC, keyboard)
+            # - High-pass filter (removes low-frequency rumble: HVAC, traffic)
+            # - Normalize (auto-gain: quiet speech amplified for consistent volume)
+            try:
+                from .audio_preprocess import preprocess_and_cleanup
+                wav_path = preprocess_and_cleanup(wav_path)
+                if self.cfg.verbose:
+                    sys.stderr.write("[whisper-flow] audio preprocessed (trim+gate+filter+normalize)\n")
+            except Exception as exc:
+                sys.stderr.write(f"[whisper-flow] audio preprocessing skipped ({exc})\n")
+
             # Construct acoustic biasing prompt (enriching from Windows window title)
             biasing_words = list(self._dictionary) if self._dictionary else []
             if app_name and app_name.strip():
@@ -523,6 +536,13 @@ class Daemon:
             wav_path, total_dur, _ = capture.snapshot_full()
             capture.close()
             self._capture = None
+
+            # Preprocess audio for better ASR accuracy (same as dictation mode)
+            try:
+                from .audio_preprocess import preprocess_and_cleanup
+                wav_path = preprocess_and_cleanup(wav_path)
+            except Exception as exc:
+                sys.stderr.write(f"[whisper-flow] audio preprocessing skipped ({exc})\n")
 
             # Transcribe the voice instruction with acoustic biasing
             biasing_words = list(self._dictionary) if self._dictionary else []
