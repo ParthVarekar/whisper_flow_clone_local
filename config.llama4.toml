@@ -1,8 +1,24 @@
-# Local llama.cpp setup for Whisperflow.
-# Start the LLM server with:
-# D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+# WhisperFlow configuration — Moonshine + rule-based cleanup (Phase 1)
+#
+# Architecture decision (see SECOND_BRAIN_RESEARCH.md / worklog):
+#   ASR backend  = Moonshine Tiny (27M, English-only, in-process ONNX)
+#   Cleanup      = rule-based (formatting.py: filler words, backtrack
+#                  detection, ITN, spacing, capitalization)
+#   LLM cleanup  = OFF by default (mode="raw") for sub-100ms latency.
+#
+# To ENABLE LLM cleanup (requires llama-server running on port 8081):
+#   1. Set mode = "auto" below
+#   2. Start llama-server:
+#      D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL \
+#        --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 \
+#        --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+#   3. Run start.bat as usual. If the LLM server is unreachable, the daemon
+#      automatically falls back to the raw rule-formatted transcript.
+#
+# ---------------------------------------------------------------------------
 
-mode = "auto"
+mode = "raw"              # "raw" = rule-based only (fast, no LLM)
+                          # "auto" = LLM cleanup (needs llama-server on 8081)
 verbose = false
 writing_style = "default"
 smart_formatting = true
@@ -11,23 +27,19 @@ command_hotkey = "ctrl+shift+t"
 dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API"]
 
 [transcription]
-backend = "qwen3_asr"
-# Whisper (legacy, kept for fallback)
-whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
-model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
-# Qwen3-ASR (primary STT engine)
-qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
-qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
-qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
-language = "auto"
+backend = "moonshine"     # Moonshine Tiny (27M, English-only, in-process ONNX)
+language = "en"           # Moonshine Tiny is English-only; always "en"
 threads = 8
 flash_attention = false
 
-# Moonshine (added from remote, commented out)
-# backend = "moonshine"
-# language = "en"
-# threads = 8
-# flash_attention = false
+# Fallback backends (kept for reference, not used when backend = "moonshine")
+# backend = "qwen3_asr"
+# whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
+# model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
+# qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
+# qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
+# qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
+
 [audio]
 mic_backend = "sounddevice"
 mic_device = "default"
@@ -36,6 +48,8 @@ stream_chunk_s = 1
 stream_max_s = 12
 
 [llm]
+# Only used when mode = "auto" (or "light"/"medium"/"high"/"summarize"/etc.)
+# When mode = "raw", this section is ignored — no LLM server is contacted.
 mode = "server"
 llama_server_bin = 'D:\llama4\llama-server.exe'
 llama_cli_bin = 'D:\llama4\llama-cli.exe'
@@ -62,4 +76,3 @@ writing_style = "casual"
 [app_styles.code]
 mode = "none"
 writing_style = "default"
-

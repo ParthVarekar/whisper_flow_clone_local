@@ -62,6 +62,7 @@ class MoonshineBackend(TranscriptionBackend):
         return self._transcriber
 
     def transcribe(self, audio_path: str, *, language: str = "auto",
+                   initial_prompt: str = "",
                    on_progress: Optional[ProgressFn] = None,
                    on_segment: Optional[SegmentFn] = None) -> TranscriptionResult:
         from moonshine_voice import load_wav_file
@@ -72,6 +73,12 @@ class MoonshineBackend(TranscriptionBackend):
 
         self._cancel_requested = False
         transcriber = self._build_transcriber()
+
+        # NOTE: Moonshine Tiny is English-only ("tiny-en"), so the `language`
+        # and `initial_prompt` (acoustic biasing) parameters are accepted for
+        # interface compatibility with the TranscriptionBackend ABC but are
+        # intentionally ignored — Moonshine has no concept of prompt biasing
+        # and always outputs English text.
 
         # Load audio
         t0 = time.perf_counter()

@@ -358,12 +358,23 @@ class Daemon:
                     context_words=self._dictionary,
                     app_context=enriched_ctx,
                 )
-                processed = self._pipeline.llm.process(
-                    user,
-                    system=system,
-                    max_tokens=self.cfg.llm.max_tokens,
-                    temperature=self.cfg.llm.temperature,
-                )
+                try:
+                    processed = self._pipeline.llm.process(
+                        user,
+                        system=system,
+                        max_tokens=self.cfg.llm.max_tokens,
+                        temperature=self.cfg.llm.temperature,
+                    )
+                except Exception as llm_exc:  # noqa: BLE001
+                    # LLM server unreachable / errored — fall back to the raw
+                    # rule-formatted transcript so dictation still works.
+                    # This keeps the pipeline functional even when llama-server
+                    # is not running (e.g. mode="auto" but no LLM started).
+                    sys.stderr.write(
+                        f"[whisper-flow] LLM cleanup failed ({llm_exc}); "
+                        f"falling back to raw transcript.\n"
+                    )
+                    processed = transcript
             else:
                 processed = transcript
 
@@ -535,12 +546,19 @@ class Daemon:
                     instruction,
                     custom_transforms=getattr(self.cfg, "custom_transforms", None),
                 )
-                output = self._pipeline.llm.process(
-                    user,
-                    system=system,
-                    max_tokens=self.cfg.llm.max_tokens,
-                    temperature=self.cfg.llm.temperature,
-                )
+                try:
+                    output = self._pipeline.llm.process(
+                        user,
+                        system=system,
+                        max_tokens=self.cfg.llm.max_tokens,
+                        temperature=self.cfg.llm.temperature,
+                    )
+                except Exception as llm_exc:  # noqa: BLE001
+                    sys.stderr.write(
+                        f"[whisper-flow] LLM transform failed ({llm_exc}); "
+                        f"inserting raw instruction.\n"
+                    )
+                    output = instruction
                 sys.stderr.write(f"[whisper-flow] transform result:\n{output}\n")
                 insert_text(output)
 
@@ -563,12 +581,19 @@ class Daemon:
                 mode = resolve_mode(self._overlay.get_selected_mode())
                 if mode != "raw":
                     system, user = build_prompt(mode, instruction)
-                    processed = self._pipeline.llm.process(
-                        user,
-                        system=system,
-                        max_tokens=self.cfg.llm.max_tokens,
-                        temperature=self.cfg.llm.temperature,
-                    )
+                    try:
+                        processed = self._pipeline.llm.process(
+                            user,
+                            system=system,
+                            max_tokens=self.cfg.llm.max_tokens,
+                            temperature=self.cfg.llm.temperature,
+                        )
+                    except Exception as llm_exc:  # noqa: BLE001
+                        sys.stderr.write(
+                            f"[whisper-flow] LLM cleanup failed ({llm_exc}); "
+                            f"falling back to raw transcript.\n"
+                        )
+                        processed = instruction
                 else:
                     processed = instruction
                 insert_text(processed)

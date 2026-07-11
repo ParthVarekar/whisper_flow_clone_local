@@ -1,9 +1,28 @@
-# whisper-flow has NO runtime pip dependencies (Python 3.8+ stdlib only).
-# This file exists to document that explicitly and to declare test/lint tools
-# for developers who want them.
+# WhisperFlow runtime dependencies.
+#
+# The core whisper_flow package is stdlib-only, but the daemon mode requires
+# these packages for ASR, mic capture, and the system tray UI.
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# Or just run start.bat — it auto-installs any missing packages on first run.
 
-# (none required at runtime)
+# ASR backend — Moonshine Tiny (27M, English-only, ONNX Runtime, in-process)
+# No external binary/server needed. Model auto-downloads on first use (~34MB).
+moonshine-voice>=0.1.0
 
-# Optional developer tooling (not required to run whisper-flow):
-# pytest>=7.0
-# ruff>=0.4
+# Microphone capture (cross-platform PortAudio binding)
+sounddevice>=0.4.6
+
+# System tray icon (daemon UI)
+pystray>=0.19.5
+
+# Image support for the tray icon (required by pystray)
+Pillow>=10.0.0
+
+# Numerical arrays (required by moonshine-voice + sounddevice)
+numpy>=1.24.0
+
+# Optional: TOML config on Python 3.8-3.10 (3.11+ has stdlib tomllib)
+# tomli; python_version < "3.11"
