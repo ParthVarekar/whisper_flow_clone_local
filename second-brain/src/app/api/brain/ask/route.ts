@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { chat } from '@/lib/llm'
-import { TfIdfIndex, tokenize } from '@/lib/matching'
+import { TfIdfIndex } from '@/lib/matching'
+import { embed, rankBySimilarity } from '@/lib/embeddings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -11,13 +12,15 @@ export const maxDuration = 30
 // Body: { "question": "what should I work on today?" }
 // Returns: { "answer": "...", "sources": [...] }
 //
-// Phase A fixes applied:
-//   A1  — system prompt sent as role:'system' (was 'assistant')
-//   A5  — honest "I don't have notes about that" when retrieval misses
-//         (previously fell back to the 10 most recent notes regardless of
-//         relevance, producing confident hallucinations)
-//   C4  — TF-IDF retrieval replaces raw keyword-count overlap (better recall
-//         + IDF down-weights words that appear in many notes)
+// Retrieval strategy (Step 3 upgrade): hybrid semantic + keyword
+//   1. Compute the query embedding (all-MiniLM-L6-v2, local)
+//   2. Rank all notes by cosine similarity to the query
+//   3. Also rank by TF-IDF keyword match
+//   4. Merge: semantic score * 0.7 + keyword score * 0.3 (normalized)
+//   5. Take top 10 for RAG context
+//
+// If embeddings are unavailable (model not loaded), falls back to TF-IDF only.
+// If TF-IDF also misses, returns honest "I couldn't find anything" (A5).
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({} as any))
   const question = String(body.question || '').trim()
@@ -25,7 +28,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'question is required' }, { status: 400 })
   }
 
-  // --- Build TF-IDF index over all notes ---
+  // --- Load all notes (with embeddings for semantic search) ---
   const allNotes = await db.note.findMany({
     orderBy: { createdAt: 'desc' },
     take: 500,
@@ -39,22 +42,64 @@ export async function POST(request: Request) {
     })
   }
 
+  // --- Semantic search (Step 3) ---
+  // Embed the query and rank notes by cosine similarity. Falls back to null
+  // if the model is unavailable.
+  const queryEmbedding = await embed(question)
+  let semanticResults: { id: string; title: string; score: number }[] = []
+  if (queryEmbedding) {
+    semanticResults = rankBySimilarity(
+      queryEmbedding,
+      allNotes.map(n => ({ id: n.id, title: n.title, embedding: n.embedding })),
+      20,
+      0.25,
+    )
+  }
+
+  // --- Keyword search (TF-IDF, always available) ---
   const index = new TfIdfIndex()
   for (const n of allNotes) {
     index.add(n.id, `${n.title} ${n.body} ${n.tags}`)
   }
-  const ranked = index.search(question, 10)
+  const keywordResults = index.search(question, 20)
 
-  // A5: if retrieval found nothing relevant, be honest — don't fall back to
-  // unrelated notes (that produced hallucinations in the old code).
-  if (ranked.length === 0) {
+  // --- Merge semantic + keyword scores ---
+  // Normalize each to 0..1, then weighted sum: semantic 0.7 + keyword 0.3
+  const scoreMap = new Map<string, { title: string; semantic: number; keyword: number }>()
+  const maxSem = semanticResults.length > 0 ? semanticResults[0].score : 1
+  const maxKw = keywordResults.length > 0 ? keywordResults[0].score : 1
+  for (const r of semanticResults) {
+    scoreMap.set(r.id, { title: r.title, semantic: r.score / maxSem, keyword: 0 })
+  }
+  for (const r of keywordResults) {
+    const existing = scoreMap.get(r.id)
+    if (existing) {
+      existing.keyword = r.score / maxKw
+    } else {
+      scoreMap.set(r.id, { title: r.title, semantic: 0, keyword: r.score / maxKw })
+    }
+  }
+
+  const hasSemantic = semanticResults.length > 0
+  const merged = [...scoreMap.entries()]
+    .map(([id, v]) => ({
+      id,
+      title: v.title,
+      score: hasSemantic ? v.semantic * 0.7 + v.keyword * 0.3 : v.keyword,
+    }))
+    .filter(r => r.score > 0.1)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
+
+  // A5: if retrieval found nothing relevant, be honest
+  if (merged.length === 0) {
     return NextResponse.json({
       answer: "I couldn't find anything about that in your notes. Try rephrasing, or capture a thought on this topic first.",
       sources: [],
     })
   }
 
-  const relevantNotes = ranked
+  const relevantNotes = merged
     .map(r => allNotes.find(n => n.id === r.id))
     .filter((n): n is NonNullable<typeof n> => !!n)
 
@@ -107,6 +152,3 @@ ${tasksContext}`
     })
   }
 }
-
-// keep tokenize import used (for potential future query-expansion)
-void tokenize

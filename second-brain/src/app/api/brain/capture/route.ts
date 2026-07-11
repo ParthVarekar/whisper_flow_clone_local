@@ -4,6 +4,7 @@ import { chat, extractJSON } from '@/lib/llm'
 import { tokenize } from '@/lib/matching'
 import { parseDueDate, sanitizeDueDate, todayContext } from '@/lib/dates'
 import { writeNoteToVault } from '@/lib/vault'
+import { embed } from '@/lib/embeddings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -112,6 +113,19 @@ export async function POST(request: Request) {
       await db.note.update({ where: { id: note.id }, data: { vaultPath } })
       note.vaultPath = vaultPath
     }
+
+    // --- Compute semantic embedding (Step 3) ---
+    // Fire-and-forget: don't delay the capture response. The model loads
+    // lazily on first use (~2s to download + load). The embedding is stored
+    // when ready, enabling semantic search + semantic linking for future
+    // captures. If the model is unavailable, this silently does nothing
+    // and the brain falls back to keyword search.
+    embed(`${note.title} ${note.body} ${note.tags}`).then(emb => {
+      if (emb) {
+        db.note.update({ where: { id: note.id }, data: { embedding: emb } })
+          .catch(e => console.error('[brain] embedding store failed:', e.message))
+      }
+    }).catch(() => {})
 
     return NextResponse.json({
       note,
