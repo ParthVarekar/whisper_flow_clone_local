@@ -110,7 +110,10 @@ class Qwen3AsrBackend(TranscriptionBackend):
             # are domain vocabulary to bias toward, not text to transcribe.
             # Without it, the model may leak the vocabulary words into the transcript.
             if initial_prompt:
-                context = f"Technical terms: {initial_prompt}"
+                # Include explicit English instruction in the prompt to prevent
+                # Hindi/other language leakage. Qwen3-ASR uses the system prompt
+                # as background knowledge, so this guides it to English-only output.
+                context = f"Language: English. Technical terms: {initial_prompt}"
                 cmd.extend(["--prompt", context])
             cmd.append(audio_path)
             return cmd

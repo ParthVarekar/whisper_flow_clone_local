@@ -75,6 +75,7 @@ class Daemon:
         self._running = False
         self._lock = threading.Lock()
         self._preview_busy = False  # guard for live preview loop
+        self._preview_accumulated = ""  # accumulated preview transcript
 
         # Per-app style cache
         self._app_styles = getattr(cfg, "app_styles", {})
@@ -235,25 +236,27 @@ class Daemon:
                 self._recording = False
 
     def _live_preview_loop(self) -> None:
-        """Periodically transcribe a rolling window and show partial text in overlay.
+        """Periodically transcribe a rolling window and show accumulated text.
 
-        Uses a 1-second poll interval so text appears quickly during recording.
-        A guard flag prevents overlapping transcriptions (if the previous
-        preview is still running when the next poll fires, it skips).
+        Uses a 1-second poll interval. Each preview transcribes the rolling
+        window (last 4s), and the text is ACCUMULATED — new text is appended
+        to the running transcript, with overlap detection to avoid duplication.
 
-        Preview transcriptions use a short 4s rolling window and skip the
-        chunking/AGC overhead (not needed for short audio) for maximum speed.
+        This shows the user a growing transcript (sentences appear one below
+        the other) instead of replacing the text each time.
         """
-        poll_s = 1.0  # 1s poll — text appears as fast as possible
+        poll_s = 1.0  # 1s poll
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
+
+        # Accumulated transcript — grows as new preview text comes in
+        self._preview_accumulated = ""
 
         while True:
             time.sleep(poll_s)
             with self._lock:
                 if not self._recording:
                     break
-            # Skip if the previous preview transcription is still running
             if self._preview_busy:
                 continue
             capture = self._capture
@@ -281,13 +284,51 @@ class Daemon:
                     if wav_path and os.path.exists(wav_path):
                         os.remove(wav_path)
                 preview_text = res.text.strip()
-                # Filter out common streaming/chunk hallucinations
                 hallucinations = {"[BLANK_AUDIO]", "Thank you for watching", "Thanks for watching.", "Subscribe to my channel", "..."}
-                if preview_text and preview_text not in hallucinations and not preview_text.startswith("Thank you for watching"):
-                    self._overlay.on_stream_preview(preview_text)
+                if not preview_text or preview_text in hallucinations or preview_text.startswith("Thank you for watching"):
+                    continue
+
+                # Accumulate: append new text, with overlap detection
+                if not self._preview_accumulated:
+                    # First preview — just set it
+                    self._preview_accumulated = preview_text
+                else:
+                    # Check if the new preview text overlaps with the end of
+                    # the accumulated text. If so, append only the new part.
+                    # Try to find the longest overlap between the end of
+                    # accumulated and the start of preview_text.
+                    accumulated = self._preview_accumulated
+                    # Simple approach: if preview_text starts with the last
+                    # few words of accumulated, it's a continuation
+                    acc_words = accumulated.split()
+                    new_words = preview_text.split()
+
+                    # Find overlap: how many words from the end of accumulated
+                    # match the start of new_words
+                    max_overlap = min(len(acc_words), len(new_words))
+                    overlap = 0
+                    for n in range(max_overlap, 0, -1):
+                        if acc_words[-n:] == new_words[:n]:
+                            overlap = n
+                            break
+
+                    if overlap > 0 and overlap < len(new_words):
+                        # Append only the non-overlapping part
+                        new_part = " ".join(new_words[overlap:])
+                        self._preview_accumulated = accumulated + " " + new_part
+                    elif overlap == 0:
+                        # No overlap — might be a new sentence or re-transcription
+                        # Only append if it's not already contained in accumulated
+                        if preview_text not in accumulated:
+                            self._preview_accumulated = accumulated + " " + preview_text
+                    # If overlap == len(new_words), the new text is fully
+                    # contained in accumulated — don't append anything
+
+                # Show the accumulated transcript (grows over time)
+                self._overlay.on_stream_preview(self._preview_accumulated)
             except Exception:  # noqa: BLE001
                 self._preview_busy = False
-                pass  # Don't crash the preview loop on transient errors
+                pass
 
     def _on_dictation_stop(self) -> None:
         with self._lock:
