@@ -117,7 +117,7 @@ class TrayIcon:
             return
 
         modes = [
-            "auto", "none", "light", "medium", "high",
+            "auto", "raw", "light", "medium", "high",
             "smart_list", "email", "coding", "meeting_notes", "social",
         ]
         styles = [
