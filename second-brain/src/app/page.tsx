@@ -99,6 +99,7 @@ export default function Home() {
   // Ask-your-brain
   const [askAnswer, setAskAnswer] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
+  const [backfilling, setBackfilling] = useState(false)
 
   // Filters
   const [filter, setFilter] = useState<string>('all')
@@ -563,14 +564,39 @@ export default function Home() {
             )}
           </div>
 
-          {/* Export button */}
-          <div className="p-3 border-t border-slate-200 dark:border-slate-800">
+          {/* Export + backfill buttons */}
+          <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-1">
             <a href="/api/brain/export" download>
               <Button variant="ghost" size="sm" className="w-full text-xs">
                 <Download className="w-3.5 h-3.5 mr-1.5" />
                 Export brain (.md)
               </Button>
             </a>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-xs"
+              onClick={async () => {
+                setBackfilling(true)
+                try {
+                  const res = await fetch('/api/brain/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 100 }) })
+                  const data = await res.json()
+                  if (data.available === false) {
+                    alert('Embedding model not available yet. It may still be downloading. Try again in a minute.')
+                  } else {
+                    alert(`Computed embeddings for ${data.processed} note(s).${data.failed > 0 ? ` ${data.failed} failed.` : ''}`)
+                  }
+                } catch (e) {
+                  alert('Backfill failed: ' + (e instanceof Error ? e.message : e))
+                } finally {
+                  setBackfilling(false)
+                }
+              }}
+              disabled={backfilling}
+            >
+              {backfilling ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1.5" />}
+              {backfilling ? 'Computing...' : 'Compute embeddings'}
+            </Button>
           </div>
         </aside>
 
