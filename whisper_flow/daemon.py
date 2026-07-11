@@ -351,6 +351,12 @@ class Daemon:
 
             sys.stderr.write(f"[whisper-flow] transcript:\n{transcript}\n")
 
+            # Show raw transcript in the popup immediately so the user sees
+            # progress while the LLM is polishing. This keeps the user engaged
+            # during the ~1-2s LLM cleanup step.
+            self._overlay.show("Transcribed ✏️ Polishing...")
+            self._overlay.preview(transcript)
+
             # Apply smart formatting
             if self.cfg.smart_formatting:
                 transcript = apply_smart_formatting(
@@ -379,6 +385,9 @@ class Daemon:
                 )
                 try:
                     t_llm_start = time.monotonic()
+                    # Update popup to show we're polishing the formatted text
+                    self._overlay.show("Polishing ✨...")
+                    self._overlay.preview(transcript)
                     processed = self._pipeline.llm.process(
                         user,
                         system=system,

@@ -33,10 +33,19 @@ SYSTEM_PROMPTS = {
         "intent, and language. Output only the polished text."
     ),
     "medium": (
-        "You are a dictation cleanup assistant. Rewrite the provided transcript into "
-        "clear, concise, natural prose. Remove filler words, false starts, minor "
-        "recognition noise, and repetition while preserving the speaker's meaning, "
-        "tone, and structure. Output only the cleaned text."
+        "You are a dictation cleanup assistant (Wispr Flow style). Rewrite the provided "
+        "transcript into clear, concise, natural prose. Your job:\n"
+        "1. Remove filler words (um, uh, like, you know, basically)\n"
+        "2. Remove false starts and self-corrections (keep only the final version)\n"
+        "3. Fix obvious recognition errors using context\n"
+        "4. Add proper punctuation (commas, periods, question marks)\n"
+        "5. Capitalize sentence starts and proper nouns\n"
+        "6. Fix grammar without changing meaning\n"
+        "7. Normalize numbers ('twenty five' → '25', 'three thirty pm' → '3:30 PM')\n"
+        "8. Remove repetition and stuttering\n"
+        "9. Preserve the speaker's meaning, tone, and language\n"
+        "10. Output ONLY the cleaned text — no labels, no quotes, no explanations\n"
+        "Keep it natural and readable, like a well-edited first draft."
     ),
     "smart_list": (
         "You are a formatting assistant. Convert the provided speech transcript "
