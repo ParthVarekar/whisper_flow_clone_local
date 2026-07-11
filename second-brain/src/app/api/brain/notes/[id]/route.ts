@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { chat, extractJSON } from '@/lib/llm'
 import { parseDueDate, sanitizeDueDate, todayContext } from '@/lib/dates'
 import { tokenize } from '@/lib/matching'
+import { moveNoteInVault, writeNoteToVault } from '@/lib/vault'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -58,6 +59,34 @@ export async function PATCH(
         data: { sourceId: id, targetId: r.id, similarity: r.score, type: 'keyword' },
       })
     }
+  }
+
+  // --- Sync to markdown vault (Step 2) ---
+  // The note may have moved folders (type/status change), so use moveNoteInVault
+  // which deletes the old .md and writes the new one.
+  const linksForVault = note.links.map(l => ({
+    target: l.target ? { title: l.target.title } : null,
+    similarity: l.similarity,
+    type: l.type,
+  }))
+  const newVaultPath = await moveNoteInVault(note.vaultPath, {
+    id: note.id,
+    title: note.title,
+    body: note.body,
+    type: note.type,
+    tags: note.tags,
+    source: note.source,
+    status: note.status,
+    confidence: note.confidence,
+    appContext: note.appContext,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+    tasks: note.tasks.map(t => ({ text: t.text, done: t.done, due: t.due })),
+    links: linksForVault,
+  })
+  if (newVaultPath && newVaultPath !== note.vaultPath) {
+    await db.note.update({ where: { id }, data: { vaultPath: newVaultPath } })
+    note.vaultPath = newVaultPath
   }
 
   return NextResponse.json({ note })
@@ -147,6 +176,32 @@ Rules:
       include: { tasks: true, links: { include: { target: true } }, backlinks: { include: { source: true } } },
     })
   })
+
+  // --- Sync to markdown vault (type/title may have changed → folder move) ---
+  const linksForVault = updated.links.map(l => ({
+    target: l.target ? { title: l.target.title } : null,
+    similarity: l.similarity,
+    type: l.type,
+  }))
+  const newVaultPath = await moveNoteInVault(updated.vaultPath, {
+    id: updated.id,
+    title: updated.title,
+    body: updated.body,
+    type: updated.type,
+    tags: updated.tags,
+    source: updated.source,
+    status: updated.status,
+    confidence: updated.confidence,
+    appContext: updated.appContext,
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
+    tasks: updated.tasks.map(t => ({ text: t.text, done: t.done, due: t.due })),
+    links: linksForVault,
+  })
+  if (newVaultPath && newVaultPath !== updated.vaultPath) {
+    await db.note.update({ where: { id }, data: { vaultPath: newVaultPath } })
+    updated.vaultPath = newVaultPath
+  }
 
   return NextResponse.json({ note: updated })
 }

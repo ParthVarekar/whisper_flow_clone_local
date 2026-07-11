@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { chat, extractJSON } from '@/lib/llm'
 import { tokenize } from '@/lib/matching'
 import { parseDueDate, sanitizeDueDate, todayContext } from '@/lib/dates'
+import { writeNoteToVault } from '@/lib/vault'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -93,6 +94,23 @@ export async function POST(request: Request) {
           type: 'keyword', // A6: matches schema default + comment
         },
       })
+    }
+
+    // --- Sync to markdown vault (Step 2: portability) ---
+    // Best-effort: never block a capture because the vault write failed.
+    const linksForVault = related.map(r => ({
+      target: { title: r.title },
+      similarity: r.score,
+      type: 'keyword',
+    }))
+    const vaultPath = await writeNoteToVault({
+      ...note,
+      tasks: note.tasks.map(t => ({ text: t.text, done: t.done, due: t.due })),
+      links: linksForVault,
+    })
+    if (vaultPath) {
+      await db.note.update({ where: { id: note.id }, data: { vaultPath } })
+      note.vaultPath = vaultPath
     }
 
     return NextResponse.json({

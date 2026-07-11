@@ -131,6 +131,15 @@ export async function DELETE(request: Request) {
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
+  // Get the vaultPath before deleting so we can remove the .md file
+  const note = await db.note.findUnique({ where: { id }, select: { vaultPath: true } })
   await db.note.delete({ where: { id } })
+
+  // Best-effort: remove the .md file from the vault
+  if (note?.vaultPath) {
+    const { removeNoteFromVault } = await import('@/lib/vault')
+    await removeNoteFromVault(note.vaultPath)
+  }
+
   return NextResponse.json({ ok: true })
 }
