@@ -260,8 +260,10 @@ class OverlayNotifier:
         def _resize_for_content(text: str):
             """Resize the popup to fit the content dynamically.
 
-            Width: 560px base, up to 720px for long lines
-            Height: 130px base, +18px per line beyond 2 lines, up to 400px max
+            Width: 560px (stable)
+            Height: 130px base, +20px per line, up to 500px max
+            Called on every PREVIEW and RESULT message so the popup grows
+            as text is added during the typewriter reveal.
             """
             if not text:
                 w, h = 560, 130
@@ -275,12 +277,17 @@ class OverlayNotifier:
                     line_len = max(1, len(line))
                     lines += max(1, (line_len + chars_per_line - 1) // chars_per_line)
                 lines = max(1, lines)
-                w = min(720, max(560, 560))  # keep width stable at 560
-                h = min(400, max(130, 70 + lines * 20))
+                w = 560  # keep width stable
+                h = min(500, max(130, 70 + lines * 20))
             sw = root.winfo_screenwidth()
             x = (sw - w) // 2
             y = root.winfo_screenheight() - h - 70
             root.geometry(f"{w}x{h}+{x}+{y}")
+            # Force the window manager to apply the resize immediately
+            try:
+                root.update_idletasks()
+            except Exception:  # noqa: BLE001
+                pass
 
         def _position():
             _resize_for_content("")

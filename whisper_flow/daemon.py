@@ -211,12 +211,12 @@ class Daemon:
                 self._overlay.set_writing_style(style_cfg["writing_style"])
 
         # Start mic capture
-        # Use a 6s rolling window for preview (faster ASR, more frequent updates)
+        # Use a 4s rolling window for preview (faster ASR, ~1-2s per preview)
         # The full audio is still captured separately via snapshot_full()
         try:
             self._capture = LiveMicCapture(
                 self.cfg.audio,
-                max_window_seconds=6,  # 6s rolling window for preview (was 12s)
+                max_window_seconds=4,  # 4s rolling window for fast preview updates
                 on_amplitude=self._overlay.amplitude,
                 verbose=self.cfg.verbose,
             )
@@ -237,11 +237,14 @@ class Daemon:
     def _live_preview_loop(self) -> None:
         """Periodically transcribe a rolling window and show partial text in overlay.
 
-        Uses a 2-second poll interval so text appears quickly during recording.
+        Uses a 1-second poll interval so text appears quickly during recording.
         A guard flag prevents overlapping transcriptions (if the previous
         preview is still running when the next poll fires, it skips).
+
+        Preview transcriptions use a short 4s rolling window and skip the
+        chunking/AGC overhead (not needed for short audio) for maximum speed.
         """
-        poll_s = 2.0  # 2s between preview transcriptions
+        poll_s = 1.0  # 1s poll — text appears as fast as possible
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
 
