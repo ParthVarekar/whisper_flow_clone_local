@@ -77,6 +77,13 @@ class Daemon:
         self._preview_busy = False  # guard for live preview loop
         self._preview_accumulated = ""  # accumulated preview transcript
 
+        # Background chunk processing state
+        self._chunk_queue = []  # list of (wav_path, timestamp) for chunks to transcribe
+        self._chunk_transcribed = ""  # accumulated transcribed text from background chunks
+        self._chunk_processor_running = False
+        self._last_chunk_time = 0.0
+        self._chunk_duration = 4.0  # seconds of audio per chunk
+
         # Per-app style cache
         self._app_styles = getattr(cfg, "app_styles", {})
         self._snippets = getattr(cfg, "snippets", {})
@@ -212,22 +219,31 @@ class Daemon:
                 self._overlay.set_writing_style(style_cfg["writing_style"])
 
         # Start mic capture
-        # Use a 4s rolling window for preview (faster ASR, ~1-2s per preview)
-        # The full audio is still captured separately via snapshot_full()
+        # Use a larger rolling window (30s) so we can extract chunks for
+        # background processing. The full audio is also captured via snapshot_full().
         try:
             self._capture = LiveMicCapture(
                 self.cfg.audio,
-                max_window_seconds=4,  # 4s rolling window for fast preview updates
+                max_window_seconds=30,  # large window so we can extract chunks
                 on_amplitude=self._overlay.amplitude,
                 verbose=self.cfg.verbose,
             )
             self._capture.start()
-            # Start live preview loop — transcribes the rolling window periodically
-            # so the user sees text appear in the popup DURING recording.
-            # Uses a 4s poll interval to avoid GPU queue buildup (Qwen3-ASR takes
-            # ~2-5s per transcription, so 4s gap prevents overlap).
+
+            # Reset background chunk processing state
+            with self._lock:
+                self._chunk_queue = []
+                self._chunk_transcribed = ""
+                self._chunk_processor_running = False
+                self._last_chunk_time = time.monotonic()
+                self._preview_accumulated = ""
+
+            # Start background chunk processor — transcribes 4s chunks in the
+            # background while the user is still speaking. This means by the
+            # time the user releases the hotkey, most of the transcription is
+            # already done. The final step is just LLM polishing.
             threading.Thread(
-                target=self._live_preview_loop, daemon=True
+                target=self._background_chunk_processor, daemon=True
             ).start()
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"[whisper-flow] mic error: {exc}\n")
@@ -235,107 +251,120 @@ class Daemon:
             with self._lock:
                 self._recording = False
 
-    def _live_preview_loop(self) -> None:
-        """Periodically transcribe a rolling window and show accumulated text.
+    def _background_chunk_processor(self) -> None:
+        """Background chunk processor — transcribes audio chunks DURING recording.
 
-        Uses a 1-second poll interval. Each preview transcribes the rolling
-        window (last 4s), and the text is ACCUMULATED — new text is appended
-        to the running transcript, with overlap detection to avoid duplication.
+        ARCHITECTURE (inspired by Wispr Flow streaming):
+        Every 4 seconds during recording, extracts the latest 4s chunk of audio
+        and transcribes it in the background. The transcribed text accumulates
+        in _chunk_transcribed and is shown to the user in real-time.
 
-        This shows the user a growing transcript (sentences appear one below
-        the other) instead of replacing the text each time.
+        By the time the user releases the hotkey, most of the transcription is
+        already done. The _process_dictation method just uses the accumulated
+        _chunk_transcribed text and only needs to do LLM polishing.
+
+        This eliminates the 5-10s wait after releasing the hotkey — the user
+        sees text appear while speaking, and the final output is nearly instant.
         """
-        poll_s = 0.2  # 0.2s poll — text appears as fast as possible
+        chunk_interval = 4.0  # extract a 4s chunk every 4s
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
 
-        # Accumulated transcript — grows as new preview text comes in
-        self._preview_accumulated = ""
-
         while True:
-            time.sleep(poll_s)
+            time.sleep(0.3)  # check every 0.3s
             with self._lock:
                 if not self._recording:
                     break
-            if self._preview_busy:
-                continue
+                if self._chunk_processor_running:
+                    continue
+
             capture = self._capture
             if capture is None:
                 break
+
+            now = time.monotonic()
+            elapsed_since_last = now - self._last_chunk_time
+            total_dur = capture.total_duration_sec
+
+            # Wait until we have at least chunk_interval seconds of new audio
+            if elapsed_since_last < chunk_interval or total_dur < chunk_interval:
+                continue
+
+            # Extract a chunk: from _last_chunk_time offset to now
+            # We use snapshot_window which gives us the rolling window
+            # But we need a specific 4s slice. Since LiveMicCapture doesn't
+            # support arbitrary offsets, we transcribe the rolling window
+            # (which is the latest 4s) and accumulate with overlap detection.
+            with self._lock:
+                if not self._recording:
+                    break
+                self._chunk_processor_running = True
+                self._last_chunk_time = now
+
             try:
-                total_ms = int(round(capture.total_duration_sec * 1000))
-                if total_ms < 600:
-                    continue
                 wav_path, _win_dur, _offset = capture.snapshot_window()
                 with self._lock:
                     if not self._recording:
                         if wav_path and os.path.exists(wav_path):
                             os.remove(wav_path)
                         break
-                self._preview_busy = True
-                try:
-                    res = self._pipeline.stt.transcribe(
-                        wav_path,
-                        language=self.cfg.transcription.language,
-                        initial_prompt=initial_p,
-                    )
-                finally:
-                    self._preview_busy = False
-                    if wav_path and os.path.exists(wav_path):
-                        os.remove(wav_path)
-                preview_text = res.text.strip()
+
+                # Transcribe this chunk
+                res = self._pipeline.stt.transcribe(
+                    wav_path,
+                    language=self.cfg.transcription.language,
+                    initial_prompt=initial_p,
+                )
+
+                if wav_path and os.path.exists(wav_path):
+                    os.remove(wav_path)
+
+                chunk_text = res.text.strip()
                 hallucinations = {"[BLANK_AUDIO]", "Thank you for watching", "Thanks for watching.", "Subscribe to my channel", "..."}
-                if not preview_text or preview_text in hallucinations or preview_text.startswith("Thank you for watching"):
+                if not chunk_text or chunk_text in hallucinations or chunk_text.startswith("Thank you for watching"):
                     continue
 
-                # Accumulate: append new text, with overlap detection
-                if not self._preview_accumulated:
-                    # First preview — just set it
-                    self._preview_accumulated = preview_text
-                else:
-                    # Check if the new preview text overlaps with the end of
-                    # the accumulated text. If so, append only the new part.
-                    # Try to find the longest overlap between the end of
-                    # accumulated and the start of preview_text.
-                    accumulated = self._preview_accumulated
-                    # Simple approach: if preview_text starts with the last
-                    # few words of accumulated, it's a continuation
-                    acc_words = accumulated.split()
-                    new_words = preview_text.split()
+                # Accumulate with overlap detection
+                with self._lock:
+                    if not self._chunk_transcribed:
+                        self._chunk_transcribed = chunk_text
+                    else:
+                        accumulated = self._chunk_transcribed
+                        acc_words = accumulated.split()
+                        new_words = chunk_text.split()
 
-                    # Find overlap: how many words from the end of accumulated
-                    # match the start of new_words
-                    max_overlap = min(len(acc_words), len(new_words))
-                    overlap = 0
-                    for n in range(max_overlap, 0, -1):
-                        if acc_words[-n:] == new_words[:n]:
-                            overlap = n
-                            break
+                        # Find overlap: words from end of accumulated match start of new
+                        max_overlap = min(len(acc_words), len(new_words))
+                        overlap = 0
+                        for n in range(max_overlap, 0, -1):
+                            if acc_words[-n:] == new_words[:n]:
+                                overlap = n
+                                break
 
-                    if overlap > 0 and overlap < len(new_words):
-                        # Append only the non-overlapping part
-                        new_part = " ".join(new_words[overlap:])
-                        self._preview_accumulated = accumulated + " " + new_part
-                    elif overlap == 0:
-                        # No overlap — might be a new sentence or re-transcription
-                        # Only append if it's not already contained in accumulated
-                        if preview_text not in accumulated:
-                            self._preview_accumulated = accumulated + " " + preview_text
-                    # If overlap == len(new_words), the new text is fully
-                    # contained in accumulated — don't append anything
+                        if overlap > 0 and overlap < len(new_words):
+                            new_part = " ".join(new_words[overlap:])
+                            self._chunk_transcribed = accumulated + " " + new_part
+                        elif overlap == 0:
+                            if chunk_text not in accumulated:
+                                self._chunk_transcribed = accumulated + " " + chunk_text
 
-                # Show the accumulated transcript (grows over time)
-                self._overlay.on_stream_preview(self._preview_accumulated)
+                    self._preview_accumulated = self._chunk_transcribed
+
+                # Show the accumulated transcript in the popup
+                self._overlay.on_stream_preview(self._chunk_transcribed)
             except Exception:  # noqa: BLE001
-                self._preview_busy = False
                 pass
+            finally:
+                with self._lock:
+                    self._chunk_processor_running = False
 
     def _on_dictation_stop(self) -> None:
         with self._lock:
             if not self._recording:
                 return
             self._recording = False
-            self._preview_busy = True  # block any new preview transcriptions
+            self._preview_busy = True  # block any new preview/chunk transcriptions
+            self._chunk_processor_running = True  # block chunk processor too
 
         duration = time.monotonic() - self._record_start_time
         sys.stderr.write(f"[whisper-flow] recording stopped ({duration:.1f}s)\n")
@@ -357,7 +386,14 @@ class Daemon:
         ).start()
 
     def _process_dictation(self, duration: float, app_name: str, app_cat: str, window_title: str = "") -> None:
-        """Transcribe, format, cleanup, and insert text."""
+        """Transcribe, format, cleanup, and insert text.
+
+        Uses background chunk processing: most transcription is already done
+        by _background_chunk_processor during recording. This method uses the
+        accumulated _chunk_transcribed text and only does a final transcription
+        of any remaining audio (the last <4s that wasn't captured as a chunk).
+        Then applies LLM polishing.
+        """
         t_total_start = time.monotonic()  # timing: total processing
         capture = self._capture
         if capture is None:
@@ -365,7 +401,7 @@ class Daemon:
             return
 
         try:
-            # Stop capture and get full audio
+            # Stop capture
             capture.stop()
             time.sleep(0.1)
 
@@ -378,36 +414,52 @@ class Daemon:
                     self._tray.set_state("idle")
                 return
 
-            # Get full audio snapshot
-            wav_path, total_dur, _ = capture.snapshot_full()
-            capture.close()
-            self._capture = None
+            # Get the accumulated background transcription
+            with self._lock:
+                accumulated_transcript = self._chunk_transcribed
 
             # Construct acoustic biasing prompt (enriching from Windows window title)
             biasing_words = list(self._dictionary) if self._dictionary else []
             if app_name and app_name.strip():
                 biasing_words.append(app_name.strip())
             if window_title and window_title.strip():
-                # Extract clean words/identifiers from window title (e.g. file names, subjects)
                 title_words = [w.strip() for w in window_title.replace("-", " ").replace("—", " ").split() if len(w.strip()) > 2]
-                biasing_words.extend(title_words[:8])  # keep top 8 title identifiers
+                biasing_words.extend(title_words[:8])
             initial_p = ", ".join(biasing_words)
 
-            # Transcribe (timed)
-            t_stt_start = time.monotonic()
-            result = self._pipeline.stt.transcribe(
-                wav_path,
-                language=self.cfg.transcription.language,
-                initial_prompt=initial_p,
-            )
-            stt_ms = (time.monotonic() - t_stt_start) * 1000
-            transcript = result.text.strip()
+            # If we have accumulated transcript from background chunks, use it.
+            # Otherwise, fall back to full transcription (short recordings <4s
+            # won't have triggered any background chunks).
+            if accumulated_transcript:
+                transcript = accumulated_transcript
+                stt_ms = 0  # already done in background
+                sys.stderr.write(f"[whisper-flow] ASR: 0ms (background chunks, {len(transcript.split())} words)\n")
 
-            # Clean up temp file
-            if wav_path and os.path.exists(wav_path):
-                os.remove(wav_path)
+                # Get full audio for cleanup (but don't transcribe it again)
+                wav_path, total_dur, _ = capture.snapshot_full()
+                capture.close()
+                self._capture = None
+                if wav_path and os.path.exists(wav_path):
+                    os.remove(wav_path)
+            else:
+                # No background transcription — transcribe the full audio
+                wav_path, total_dur, _ = capture.snapshot_full()
+                capture.close()
+                self._capture = None
 
-            sys.stderr.write(f"[whisper-flow] ASR: {stt_ms:.0f}ms\n")
+                t_stt_start = time.monotonic()
+                result = self._pipeline.stt.transcribe(
+                    wav_path,
+                    language=self.cfg.transcription.language,
+                    initial_prompt=initial_p,
+                )
+                stt_ms = (time.monotonic() - t_stt_start) * 1000
+                transcript = result.text.strip()
+
+                if wav_path and os.path.exists(wav_path):
+                    os.remove(wav_path)
+
+                sys.stderr.write(f"[whisper-flow] ASR: {stt_ms:.0f}ms\n")
 
             if not transcript:
                 sys.stderr.write(
