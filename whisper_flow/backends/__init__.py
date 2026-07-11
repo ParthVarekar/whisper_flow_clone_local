@@ -4,6 +4,7 @@ from .base import LLMBackend, Segment, TranscriptionBackend, TranscriptionResult
 from .llama_cpp import LlamaCppBackend
 from .qwen3_asr import Qwen3AsrBackend
 from .whisper_cpp import WhisperCppBackend
+from .moonshine import MoonshineBackend
 
 __all__ = [
     "LLMBackend",
@@ -13,4 +14,5 @@ __all__ = [
     "WhisperCppBackend",
     "Qwen3AsrBackend",
     "LlamaCppBackend",
+    "MoonshineBackend",
 ]

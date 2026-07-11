@@ -34,6 +34,34 @@ _BACKTRACK_MARKERS = (
     "no wait",
 )
 
+# Filler words and disfluencies to strip during rule-based cleanup.
+# These are the same words Wispr Flow's LLM removes, but handled with regex
+# instead of a model — costs 0ms, works on any device.
+_FILLER_PATTERNS = [
+    # Standalone fillers between words
+    (r"\b(um|uh|hmm|uhm|erm|ah)\b[,\s]*", ""),
+    # "like" used as filler (not comparison): "like I was thinking" → "I was thinking"
+    # but keep "like this" or "looks like"
+    (r"\blike\s+(?=[A-Z])", ""),
+    # "you know" as filler
+    (r"\byou know[,\s]*", ""),
+    # "I mean" as filler (already handled by backtrack, but catch standalone)
+    (r"\bI mean[,\s]+", ""),
+    # "sort of" / "kind of" as filler
+    (r"\b(sort of|kind of)[,\s]*", ""),
+    # "basically" / "literally" / "honestly" / "obviously" as filler anywhere
+    (r"\b(basically|literally|honestly|obviously)\b[,\s]*", ""),
+    # "I think" / "I guess" as trailing filler
+    (r",?\s*I think\s*\.?$", "."),
+    (r",?\s*I guess\s*\.?$", "."),
+    # Double spaces left behind after removal
+    (r"  +", " "),
+    # Comma followed by nothing (orphaned)
+    (r",\s*(?=[,.;:!?]|$)", ""),
+    # Space before punctuation
+    (r"\s+([,.;:!?])", r"\1"),
+]
+
 
 def apply_smart_formatting(text: str, *, writing_style: str = "default") -> str:
     """Apply lightweight formatting rules inspired by Wispr Flow behavior."""
@@ -44,6 +72,7 @@ def apply_smart_formatting(text: str, *, writing_style: str = "default") -> str:
     press_enter = bool(re.search(r"\bpress enter\b\s*$", out, flags=re.IGNORECASE))
     out = _apply_newlines(out)
     out = _apply_punctuation_words(out)
+    out = _apply_fillers(out)
     out = _apply_backtrack(out)
     out = _apply_press_enter(out)
     out = _normalize_spacing(out)
@@ -65,6 +94,13 @@ def _apply_punctuation_words(text: str) -> str:
     out = text
     for pattern, repl in _PUNCT_WORDS:
         out = re.sub(pattern, repl, out, flags=re.IGNORECASE)
+    return out
+
+
+def _apply_fillers(text: str) -> str:
+    out = text
+    for pattern, repl in _FILLER_PATTERNS:
+        out = re.sub(pattern, repl, out, flags=re.IGNORECASE | re.MULTILINE)
     return out
 
 

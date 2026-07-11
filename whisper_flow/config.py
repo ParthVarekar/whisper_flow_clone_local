@@ -44,7 +44,7 @@ WHISPER_AUDIO_CODEC = "pcm_s16le"
 class TranscriptionConfig:
     """whisper.cpp (STT) backend settings."""
 
-    backend: str = "whisper_cpp"  # "whisper_cpp" | "qwen3_asr"
+    backend: str = "whisper_cpp"  # "whisper_cpp" | "qwen3_asr" | "moonshine"
     whisper_bin: str = DEFAULT_WHISPER_BIN
     model: str = ""  # path to ggml Whisper .bin (e.g. ggml-base.en.bin)
     language: str = "auto"  # "auto", "en", "fr", ... ; "auto" lets whisper detect

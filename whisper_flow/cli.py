@@ -39,6 +39,7 @@ def _add_common_transcription_opts(p: argparse.ArgumentParser) -> None:
     p.add_argument("--duration", type=float, default=5.0,
                    help="mic recording duration in seconds (0 = Start/Stop live microphone session)")
     p.add_argument("--language", help="spoken language (e.g. en, fr, auto)")
+    p.add_argument("--backend", choices=["whisper_cpp", "qwen3_asr", "moonshine"], help="STT backend (moonshine = fastest, no model download needed)")
     p.add_argument("--whisper-model", "--stt-model", help="path to ggml Whisper .bin model")
     p.add_argument("--whisper-bin", help="path to whisper-cli binary")
     p.add_argument("--translate", action="store_true", default=argparse.SUPPRESS, help="translate to English")
@@ -118,6 +119,7 @@ def _overrides_from_args(args: argparse.Namespace) -> dict:
         o[key] = val
 
     put("transcription.language", getattr(args, "language", None))
+    put("transcription.backend", getattr(args, "backend", None))
     put("transcription.model", getattr(args, "whisper_model", None))
     put("transcription.whisper_bin", getattr(args, "whisper_bin", None))
     put("transcription.translate", getattr(args, "translate", None))

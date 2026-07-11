@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Optional
 import threading
 
 from .audio import LiveMicCapture, capture_mic, chunk_audio, normalize_file, stop_active_capture
-from .backends import LlamaCppBackend, Qwen3AsrBackend, Segment, TranscriptionBackend, TranscriptionResult, WhisperCppBackend
+from .backends import LlamaCppBackend, MoonshineBackend, Qwen3AsrBackend, Segment, TranscriptionBackend, TranscriptionResult, WhisperCppBackend
 from .config import Config
 from .formatting import apply_smart_formatting
 from .notifier import Notifier, NullNotifier
@@ -130,7 +130,9 @@ class Pipeline:
     def stt(self) -> TranscriptionBackend:
         if self._stt is None:
             backend = getattr(self.cfg.transcription, "backend", "whisper_cpp")
-            if backend == "qwen3_asr":
+            if backend == "moonshine":
+                self._stt = MoonshineBackend(self.cfg.transcription, verbose=self.cfg.verbose)
+            elif backend == "qwen3_asr":
                 self._stt = Qwen3AsrBackend(self.cfg.transcription, verbose=self.cfg.verbose)
             else:
                 self._stt = WhisperCppBackend(self.cfg.transcription, verbose=self.cfg.verbose)
