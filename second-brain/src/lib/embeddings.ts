@@ -16,8 +16,13 @@
  * Cosine similarity is computed in JS — fast enough for <10k notes. For
  * larger brains, upgrade to sqlite-vec (a native SQLite extension).
  */
-import { pipeline } from '@xenova/transformers'
-
+// NOTE: @xenova/transformers is imported LAZILY (dynamic import inside
+// getEmbedder) rather than at the top level. This is critical for memory:
+// transformers.js is a heavy package (~50MB parsed), and importing it at the
+// top level would cause every route that touches embeddings.ts to load it
+// during compilation, spiking memory and OOM-killing the dev server in
+// constrained environments. With lazy import, the package only loads when
+// an embedding is actually computed (first capture or backfill).
 let _embedderPromise: Promise<any> | null = null
 let _available = true // set false if model fails to load
 
@@ -27,6 +32,8 @@ const MODEL_ID = 'Xenova/all-MiniLM-L6-v2'
 async function getEmbedder(): Promise<any | null> {
   if (!_available) return null
   if (!_embedderPromise) {
+    // Dynamic import — only loads transformers.js when actually needed
+    const { pipeline } = await import('@xenova/transformers')
     _embedderPromise = pipeline('feature-extraction', MODEL_ID, {
       quantized: true, // use quantized model (~23MB vs ~90MB)
     }).catch(err => {
