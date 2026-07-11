@@ -1,10 +1,20 @@
-# WhisperFlow configuration — Moonshine + rule-based cleanup (Phase 1)
+# WhisperFlow configuration — Whisper.cpp + rule-based cleanup
 #
-# Architecture decision (see SECOND_BRAIN_RESEARCH.md / worklog):
-#   ASR backend  = Moonshine Tiny (27M, English-only, in-process ONNX)
-#   Cleanup      = rule-based (formatting.py: filler words, backtrack
-#                  detection, ITN, spacing, capitalization)
-#   LLM cleanup  = OFF by default (mode="raw") for sub-100ms latency.
+# Architecture decision (revised July 2026):
+#   ASR backend  = whisper.cpp with ggml-base.en (74M params)
+#   Cleanup      = rule-based (formatting.py)
+#   LLM cleanup  = OFF by default (mode="raw") for fast, no-server operation
+#
+# WHY NOT MOONSHINE?
+#   Moonshine Tiny (27M) was too small for real-world desktop/laptop mic
+#   capture at a distance. It produced hallucinated transcripts that didn't
+#   match what was spoken. Whisper Base (74M) is 2.8x larger and handles
+#   distant mic capture + background noise far better.
+#
+# To switch back to Moonshine (for close-mic / headset use):
+#   1. Set backend = "moonshine" below
+#   2. Comment out whisper_bin + model
+#   3. Moonshine runs in-process (no external binary needed)
 #
 # To ENABLE LLM cleanup (requires llama-server running on port 8081):
 #   1. Set mode = "auto" below
@@ -12,8 +22,8 @@
 #      D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL \
 #        --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 \
 #        --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
-#   3. Run start.bat as usual. If the LLM server is unreachable, the daemon
-#      automatically falls back to the raw rule-formatted transcript.
+#   3. If the LLM server is unreachable, the daemon automatically falls back
+#      to the raw rule-formatted transcript.
 #
 # ---------------------------------------------------------------------------
 
@@ -27,15 +37,24 @@ command_hotkey = "ctrl+shift+t"
 dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API"]
 
 [transcription]
-backend = "moonshine"     # Moonshine Tiny (27M, English-only, in-process ONNX)
-language = "en"           # Moonshine Tiny is English-only; always "en"
+# Primary backend: whisper.cpp with ggml-base.en (74M, English-only)
+# Much more accurate than Moonshine Tiny for desktop/distant mic capture.
+backend = "whisper_cpp"
+whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
+model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
+language = "en"           # English-only model; always "en"
 threads = 8
-flash_attention = false
+flash_attention = true
 
-# Fallback backends (kept for reference, not used when backend = "moonshine")
+# Alternative backend: Moonshine Tiny (27M, in-process ONNX)
+# Faster (~50ms vs ~500ms) but less accurate for distant mic.
+# To use: uncomment these lines and comment out the whisper_cpp lines above.
+# backend = "moonshine"
+# language = "en"
+
+# Alternative backend: Qwen3-ASR (1.7B, most accurate but needs crispasr.exe)
+# To use: uncomment these lines and comment out the whisper_cpp lines above.
 # backend = "qwen3_asr"
-# whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
-# model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
 # qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
 # qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
 # qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'

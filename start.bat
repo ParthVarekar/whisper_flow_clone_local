@@ -5,7 +5,7 @@ cd /d "%~dp0"
 cls
 echo =======================================================================
 echo               WHISPER FLOW - ONE-CLICK LAUNCHER
-echo            Moonshine Tiny (27M) + rule-based cleanup
+echo            whisper.cpp (base.en) + rule-based cleanup
 echo =======================================================================
 echo.
 
@@ -40,15 +40,8 @@ if defined VENV_DIR (
 
 :: -----------------------------------------------------------------------
 :: 3. Ensure required Python packages are installed
-::    Moonshine runs in-process via ONNX Runtime — no external server needed.
 :: -----------------------------------------------------------------------
 echo [CHECK] Verifying Python dependencies...
-
-python -c "import moonshine_voice" >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo [INSTALL] Installing moonshine-voice ^(one-time, ~80MB download^)...
-    python -m pip install moonshine-voice
-)
 
 python -c "import sounddevice" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
@@ -89,28 +82,63 @@ if %ERRORLEVEL% NEQ 0 (
     )
 )
 
-:: -----------------------------------------------------------------------
-:: 4. Verify the Moonshine model is available
-::    (moonshine-voice auto-downloads "tiny-en" on first use)
-:: -----------------------------------------------------------------------
-echo [CHECK] Verifying Moonshine Tiny model...
-python -c "from moonshine_voice import get_model_path; get_model_path('tiny-en'); print('[OK] Moonshine Tiny model ready')" 2>nul
+:: Also install moonshine-voice (optional, for users who want to switch
+:: to the faster-but-less-accurate Moonshine backend)
+python -c "import moonshine_voice" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo [WARN] Could not pre-load Moonshine model. It will download on first dictation.
+    echo [INSTALL] Installing moonshine-voice ^(optional backend, ~80MB^)...
+    python -m pip install moonshine-voice
+)
+
+:: -----------------------------------------------------------------------
+:: 4. Verify whisper.cpp binary and model exist
+:: -----------------------------------------------------------------------
+echo [CHECK] Verifying whisper.cpp installation...
+
+set "WHISPER_BIN=C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe"
+set "WHISPER_MODEL=C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin"
+
+if not exist "%WHISPER_BIN%" (
+    color 0E
+    echo [WARNING] whisper-cli.exe not found at:
+    echo   %WHISPER_BIN%
+    echo.
+    echo The daemon will fail to transcribe. Either:
+    echo   1. Install whisper.cpp at the expected path, OR
+    echo   2. Edit config.llama4.toml to use a different backend (moonshine/qwen3_asr)
+    echo.
+    color 0A
+)
+
+if not exist "%WHISPER_MODEL%" (
+    color 0E
+    echo [WARNING] ggml-base.en.bin model not found at:
+    echo   %WHISPER_MODEL%
+    echo.
+    echo Download it with:
+    echo   cd C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp
+    echo   bash models\download-ggml-model.sh base.en
+    echo   move models\ggml-base.en.bin C:\Users\Parth\Desktop\whisper\models\
+    echo.
+    color 0A
+)
+
+if exist "%WHISPER_BIN%" if exist "%WHISPER_MODEL%" (
+    echo [OK] whisper.cpp binary and model found.
 )
 
 :: -----------------------------------------------------------------------
 :: 5. Start the WhisperFlow daemon
 ::    Config: config.llama4.toml
-::      - backend = "moonshine"  (in-process, no external server)
-::      - language = "en"        (Moonshine Tiny is English-only)
-::      - mode = "raw"           (rule-based cleanup, no LLM needed)
+::      - backend = "whisper_cpp"  (whisper-cli + ggml-base.en, 74M params)
+::      - language = "en"          (English-only model)
+::      - mode = "raw"             (rule-based cleanup, no LLM needed)
 :: -----------------------------------------------------------------------
 echo.
 echo =======================================================================
 echo   Starting WhisperFlow Daemon...
 echo.
-echo   Backend:  Moonshine Tiny (27M, English, ONNX Runtime)
+echo   Backend:  whisper.cpp + base.en (74M, English)
 echo   Cleanup:  Rule-based (formatting.py)
 echo   Config:   config.llama4.toml
 echo.
