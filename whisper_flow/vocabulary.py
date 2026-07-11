@@ -44,32 +44,45 @@ def load_learned_vocabulary(vocab_dir: str | None = None) -> List[str]:
 
 
 def extract_candidate_terms(text: str) -> Set[str]:
-    """Extract candidate proper nouns, file names, and technical terms from text."""
+    """Extract candidate proper nouns, file names, and technical terms from text.
+
+    CONSERVATIVE EXTRACTION — only high-confidence terms:
+    - File extensions: daemon.py, config.toml (very unlikely to be ASR errors)
+    - snake_case: whisper_flow, user_id (very unlikely to be ASR errors)
+    - camelCase: WhisperFlow, PyTorch (very unlikely to be ASR errors)
+    - ALL-CAPS acronyms: GGUF, CUDA, API (3+ chars, unlikely to be ASR errors)
+
+    NOT extracted (too risky — could be ASR mishearings):
+    - Simple capitalized words: "Quan", "Moonshine", "This"
+      These could be mishearings (e.g., "Qwen" → "Quan") and would create
+      a feedback loop that reinforces errors in the learned vocabulary.
+    """
     if not text:
         return set()
 
     candidates: Set[str] = set()
 
-    # 1. Technical identifiers: file.ext, snake_case, camelCase (e.g. daemon.py, user_id, WhisperFlow)
-    tech_pattern = r"\b[a-zA-Z0-9_\-]+\.[a-zA-Z0-9]+\b|\b[a-z]+(?:_[a-z0-9]+)+\b|\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\b"
+    # 1. Technical identifiers: file.ext, snake_case, camelCase
+    # These patterns are very unlikely to occur in natural speech, so if they
+    # appear in the transcript, they're almost certainly correct.
+    tech_pattern = (
+        r"\b[a-zA-Z0-9_\-]+\.[a-zA-Z0-9]+\b"  # file.ext: daemon.py, config.toml
+        r"|\b[a-z]+(?:_[a-z0-9]+)+\b"          # snake_case: whisper_flow, user_id
+        r"|\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\b"  # camelCase: WhisperFlow, PyTorch
+    )
     for match in re.findall(tech_pattern, text):
         if len(match) > 2:
             candidates.add(match)
 
-    # 2. Capitalized Proper Nouns (excluding sentence start if simple word)
-    words = text.split()
-    for i, word in enumerate(words):
+    # 2. ALL-CAPS acronyms (3+ chars): GGUF, CUDA, API, HTTP
+    # These are unlikely to be ASR errors because natural speech rarely
+    # produces all-caps output. Only match if ALL characters are uppercase.
+    for word in text.split():
         clean_word = re.sub(r"^[^\w]+|[^\w]+$", "", word)
         if not clean_word or len(clean_word) < 3:
             continue
-        # Check if capitalized or acronym (e.g., PyTorch, GGUF, CUDA, Antigravity)
-        if clean_word[0].isupper() or clean_word.isupper():
-            # If it's the first word of a sentence, only include if mixed case or acronym
-            if i == 0 or (i > 0 and words[i - 1].endswith((".", "!", "?"))):
-                if any(c.isupper() for c in clean_word[1:]) or clean_word.isupper():
-                    candidates.add(clean_word)
-            else:
-                candidates.add(clean_word)
+        if clean_word.isupper() and clean_word.isalpha():
+            candidates.add(clean_word)
 
     return candidates
 
