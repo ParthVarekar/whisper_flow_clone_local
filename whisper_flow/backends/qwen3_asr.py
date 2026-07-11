@@ -101,16 +101,16 @@ class Qwen3AsrBackend(TranscriptionBackend):
             #   "the model learns to utilize the context tokens inside the system
             #    prompt as background knowledge"
             #
-            # CrispASR's --prompt flag passes text into the LLM context. We format
-            # the vocabulary as a natural-language context string so Qwen3-ASR
-            # treats it as background knowledge to bias recognition.
+            # FORMAT (empirically validated by TypeWhisperer issue #321, 184-run sweep):
+            #   "Technical terms: X, Y, Z"  → WER 18.2% (best without phonetic hints)
+            #   "X Y Z" (bare space-joined) → WER 33.8% (WORSE than no context!)
+            #   "Terms that may appear..."  → verbose, less effective
             #
-            # Format: "Terms that may appear: X, Y, Z. Use these exact spellings."
+            # The "Technical terms:" prefix is critical — it tells Qwen3-ASR these
+            # are domain vocabulary to bias toward, not text to transcribe.
+            # Without it, the model may leak the vocabulary words into the transcript.
             if initial_prompt:
-                context = (
-                    f"Terms that may appear in the audio: {initial_prompt}. "
-                    f"Use these exact spellings when the audio contains these terms."
-                )
+                context = f"Technical terms: {initial_prompt}"
                 cmd.extend(["--prompt", context])
             cmd.append(audio_path)
             return cmd

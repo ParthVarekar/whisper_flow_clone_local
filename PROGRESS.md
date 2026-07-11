@@ -15,13 +15,30 @@
 
 **CrispASR command (working):**
 ```
-crispasr.exe -m <model> -l auto -t 8 -bs 5 -nt -np --prompt <context> <audio.wav>
+crispasr.exe -m <model> -l auto -t 8 -bs 5 -nt -np --prompt "Technical terms: <vocab>" <audio.wav>
 ```
 - `-bs 5` — beam search (HELPS, do not remove)
 - `--prompt` — contextual biasing via Qwen3-ASR system prompt (HELPS proper nouns)
-  - Format: "Terms that may appear in the audio: X, Y, Z. Use these exact spellings..."
+  - Format: `"Technical terms: X, Y, Z"` (empirically validated, see below)
   - Qwen3-ASR does NOT support `--hotwords` (granite-backend-only, silently ignored)
   - The model uses the prompt as "background knowledge" per the technical report
+
+**Context format (empirically validated — TypeWhisperer issue #321, 184-run sweep):**
+| Format | Avg WER | Notes |
+|---|---|---|
+| Empty (no context) | 35.2% | Baseline |
+| `"X Y Z"` (bare space-joined) | 33.8% | WORSE than no context! |
+| `"X, Y, Z"` (bare CSV) | 33.0% | Slightly better, but leaks tokens |
+| **`"Technical terms: X, Y, Z"`** | **18.2%** | **Best without phonetic hints** |
+| `"Technical terms: X (phonetic), ..."` | 16.1% | Best with phonetic hints |
+
+The `"Technical terms:"` prefix is CRITICAL — without it, the model may leak
+the vocabulary words into the transcript. With it, the model treats them as
+domain vocabulary to bias toward.
+
+Phonetic hints help for commonly-misheard terms:
+- `"Qwen3 (kwen three)"` — prevents "when three" / "Quan three"
+- `"Moonshine"` — no hint needed, recognized correctly with biasing
 
 **LLM cleanup:** mode="auto" uses llama-server + gemma-4-E4B-it for post-processing.
 The LLM polishes the raw Qwen3-ASR transcript — fixes grammar, removes fillers,

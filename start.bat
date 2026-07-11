@@ -114,20 +114,28 @@ if "%ALL_FOUND%"=="1" (
 )
 
 :: -----------------------------------------------------------------------
-:: 5. Check if llama-server is running (for LLM cleanup)
+:: 5. Check if llama-server is running (for LLM cleanup); auto-start if not
 :: -----------------------------------------------------------------------
 echo [CHECK] Checking for llama-server on port 8081...
 powershell -Command "$s = New-Object System.Net.Sockets.TcpClient; try { $s.Connect('127.0.0.1', 8081); exit 0 } catch { exit 1 }" >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
-    echo [OK] llama-server is running on port 8081. LLM cleanup active.
+    echo [OK] llama-server is already running on port 8081. LLM cleanup active.
 ) else (
-    color 0E
-    echo [WARNING] llama-server not running on port 8081.
-    echo   LLM cleanup will fail — daemon falls back to raw transcript.
-    echo   To start it:
-    echo     D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
-    echo.
-    color 0A
+    echo [STARTING] llama-server not running. Launching it now...
+    if exist "D:\llama4\llama-server.exe" (
+        start "llama-server" /min "D:\llama4\llama-server.exe" -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+        echo [OK] llama-server process started in background window.
+        echo        Waiting for it to load the model ^(may take 10-30 seconds^)...
+        timeout /t 15 /nobreak >nul
+        echo [OK] Wait complete. Proceeding with daemon startup.
+    ) else (
+        color 0E
+        echo [WARNING] D:\llama4\llama-server.exe not found.
+        echo   LLM cleanup will fail — daemon falls back to raw transcript.
+        echo   To enable LLM cleanup, install llama.cpp and set the path in config.llama4.toml
+        echo.
+        color 0A
+    )
 )
 
 :: -----------------------------------------------------------------------

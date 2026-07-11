@@ -11,7 +11,7 @@ writing_style = "default"
 smart_formatting = true
 dictation_hotkey = "ctrl+shift+space"
 command_hotkey = "ctrl+shift+t"
-dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API", "Qwen3-ASR", "Qwen3", "Moonshine", "crispasr", "CrispASR"]
+dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API", "Qwen3-ASR (kwen three)", "Qwen3 (kwen three)", "Moonshine", "crispasr", "CrispASR"]
 
 [transcription]
 backend = "qwen3_asr"
