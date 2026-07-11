@@ -369,14 +369,12 @@ class Daemon:
             sys.stderr.write(f"[whisper-flow] transcript:\n{transcript}\n")
 
             # Stream the raw transcript word-by-word to the popup so the user
-            # sees it appear progressively (not a sudden block of text).
-            self._overlay.show("Transcribing ✏️")
-            self._stream_text_to_popup(transcript)
+            # sees it appear progressively (typewriter effect).
+            self._overlay.show("Transcribed ✏️ Polishing...")
+            self._stream_text_to_popup(transcript, words_per_chunk=3, delay=0.035)
 
             # Brief pause so user can read the raw transcript before polishing
-            time.sleep(0.3)
-            self._overlay.show("Polishing ✨...")
-            self._overlay.preview(transcript)
+            time.sleep(0.4)
 
             # Apply smart formatting
             if self.cfg.smart_formatting:
@@ -406,9 +404,8 @@ class Daemon:
                 )
                 try:
                     t_llm_start = time.monotonic()
-                    # Update popup to show we're polishing the formatted text
+                    # Update popup status to show we're polishing
                     self._overlay.show("Polishing ✨...")
-                    self._overlay.preview(transcript)
                     processed = self._pipeline.llm.process(
                         user,
                         system=system,

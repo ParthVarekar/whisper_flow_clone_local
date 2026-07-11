@@ -111,19 +111,17 @@ class OverlayNotifier:
         self._q.put((_MSG_PROCESSING, "Processing & Polishing..."))
 
     def show_result(self, text: str) -> None:
-        """Show final transcribed & cleaned output with a typewriter reveal effect.
+        """Show final polished output with a typewriter reveal effect.
 
         The text appears progressively (word-by-word) so the user sees
-        the polished output appear, making the polishing step feel responsive
-        and engaging rather than a sudden block of text.
+        the polished output appear, making the polishing step feel responsive.
+        Uses PREVIEW during typing (doesn't trigger auto-hide), then sends
+        RESULT once at the end (triggers dynamic auto-hide based on length).
         """
         if not text:
             return
-        display = text if len(text) <= 350 else text[:345] + "..."
+        display = text if len(text) <= 500 else text[:495] + "..."
 
-        # Progressive typewriter reveal: use PREVIEW (not RESULT) for the
-        # typing animation, then send RESULT once at the end. This prevents
-        # the "done" phase + auto-hide from triggering on each partial update.
         def _reveal_progressive():
             import time
             words = display.split(" ")
@@ -134,9 +132,10 @@ class OverlayNotifier:
                     partial += " ▌"  # cursor block
                 # Use PREVIEW during typing (doesn't trigger auto-hide)
                 self._q.put((_MSG_PREVIEW, partial))
-                time.sleep(0.05)  # 50ms between chunks
+                time.sleep(0.04)  # 40ms between chunks
 
-            # Send the final RESULT (switches to "done" state with green dot)
+            # Send the final RESULT (switches to "done" state with green dot
+            # and triggers dynamic auto-hide based on text length)
             self._q.put((_MSG_RESULT, display))
 
         threading.Thread(target=_reveal_progressive, daemon=True).start()
@@ -379,8 +378,17 @@ class OverlayNotifier:
                         phase[0] = "done"
                         dot.delete("all")
                         dot.create_oval(2, 2, 12, 12, fill="#22c55e", outline="")
-                        # Auto-hide after 3.5s so user has time to read
-                        root.after(3500, lambda: self.hide() if phase[0] == "done" else None)
+                        # Dynamic auto-hide: longer text stays longer.
+                        # Formula: 3s base + 0.05s per word, capped at 15s max.
+                        # Examples:
+                        #   10 words → 3.5s
+                        #   30 words → 4.5s
+                        #   50 words → 5.5s
+                        #   100 words → 8s
+                        #   200+ words → 15s (max)
+                        word_count = len(str(data).split())
+                        hide_delay_ms = min(15000, int(3000 + word_count * 50))
+                        root.after(hide_delay_ms, lambda: self.hide() if phase[0] == "done" else None)
                     elif msg_type == _MSG_AMPLITUDE:
                         rms = float(data)
                         meter_level[0] = max(rms, meter_level[0] * 0.85)
