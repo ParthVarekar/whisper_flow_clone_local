@@ -103,30 +103,58 @@ class MoonshineBackend(TranscriptionBackend):
             from ..errors import CancelledError
             raise CancelledError("transcription cancelled by user")
 
-        # Extract text
+        # Extract text and segments from the Transcript object.
+        #
+        # moonshine-voice API (verified against installed package):
+        #   Transcript is a dataclass with a single field: `lines: List[TranscriptLine]`
+        #   It does NOT have a `.text` attribute (previous code checked hasattr(transcript, "text")
+        #   which was always False → text stayed empty → "empty transcript" error).
+        #
+        #   TranscriptLine is a dataclass with fields:
+        #     text: str
+        #     start_time: float    (seconds from start of audio)
+        #     duration: float      (seconds)
+        #     is_complete: bool
+        #     words: Optional[List[WordTiming]]
+        #     ... (other metadata)
+        #
+        #   There is NO `start` or `end` attribute — previous code used getattr(line, "start"/"end")
+        #   which silently returned 0 for every segment.
         text = ""
-        if hasattr(transcript, "text"):
-            text = transcript.text.strip()
-        elif isinstance(transcript, str):
-            text = transcript.strip()
-
-        # Build segments (Moonshine may provide word timings)
         segments: list[Segment] = []
-        if hasattr(transcript, "lines") and transcript.lines:
+
+        if isinstance(transcript, str):
+            # Defensive: some future version might return a plain string
+            text = transcript.strip()
+            if text:
+                segments.append(Segment(text=text, start_ms=0, end_ms=0, language="en"))
+        elif transcript is not None and hasattr(transcript, "lines"):
+            line_texts: list[str] = []
             for line in transcript.lines:
                 seg_text = getattr(line, "text", "").strip()
                 if not seg_text:
                     continue
-                start_ms = int(getattr(line, "start", 0) * 1000) if hasattr(line, "start") else 0
-                end_ms = int(getattr(line, "end", 0) * 1000) if hasattr(line, "end") else 0
+                line_texts.append(seg_text)
+                # Convert start_time (seconds) + duration (seconds) → ms
+                start_time_s = float(getattr(line, "start_time", 0.0) or 0.0)
+                duration_s = float(getattr(line, "duration", 0.0) or 0.0)
+                start_ms = int(start_time_s * 1000)
+                end_ms = int((start_time_s + duration_s) * 1000)
                 segments.append(Segment(
                     text=seg_text,
                     start_ms=start_ms,
                     end_ms=end_ms,
                     language="en",
                 ))
-        elif text:
-            segments.append(Segment(text=text, start_ms=0, end_ms=0, language="en"))
+            text = " ".join(line_texts).strip()
+        elif transcript is not None and hasattr(transcript, "text"):
+            # Defensive: if a future moonshine-voice version adds .text
+            text = transcript.text.strip() if transcript.text else ""
+            if text:
+                segments.append(Segment(text=text, start_ms=0, end_ms=0, language="en"))
+
+        if self.verbose:
+            print(f"[moonshine] lines: {len(segments)}, text: {text!r}", flush=True)
 
         # Call segment callback
         if on_segment and segments:
