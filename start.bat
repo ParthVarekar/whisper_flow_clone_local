@@ -5,7 +5,7 @@ cd /d "%~dp0"
 cls
 echo =======================================================================
 echo               WHISPER FLOW - ONE-CLICK LAUNCHER
-echo            Qwen3-ASR (1.7B) + rule-based cleanup
+echo            Qwen3-ASR (1.7B) + LLM cleanup (gemma-4)
 echo =======================================================================
 echo.
 
@@ -88,7 +88,6 @@ echo [CHECK] Verifying Qwen3-ASR installation...
 
 set "QWEN_BIN=C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe"
 set "QWEN_MODEL=C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf"
-set "QWEN_MMPROJ=C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf"
 
 set "ALL_FOUND=1"
 
@@ -112,28 +111,33 @@ if not exist "%QWEN_MODEL%" (
 
 if "%ALL_FOUND%"=="1" (
     echo [OK] Qwen3-ASR binary and model found.
-) else (
-    echo [ERROR] Qwen3-ASR files are missing. The daemon will fail to transcribe.
-    echo.
-    echo To use a different backend, edit config.llama4.toml:
-    echo   - whisper_cpp: needs whisper-cli.exe + ggml-*.bin model
-    echo   - moonshine:   needs 'pip install moonshine-voice' (in-process, no binary)
-    echo.
 )
 
 :: -----------------------------------------------------------------------
-:: 5. Start the WhisperFlow daemon
-::    Config: config.llama4.toml
-::      - backend = "qwen3_asr"  (1.7B speech-LLM, most accurate)
-::      - language = "en"        (English)
-::      - mode = "raw"           (rule-based cleanup, no LLM needed)
+:: 5. Check if llama-server is running (for LLM cleanup)
+:: -----------------------------------------------------------------------
+echo [CHECK] Checking for llama-server on port 8081...
+powershell -Command "$s = New-Object System.Net.Sockets.TcpClient; try { $s.Connect('127.0.0.1', 8081); exit 0 } catch { exit 1 }" >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    echo [OK] llama-server is running on port 8081. LLM cleanup active.
+) else (
+    color 0E
+    echo [WARNING] llama-server not running on port 8081.
+    echo   LLM cleanup will fail — daemon falls back to raw transcript.
+    echo   To start it:
+    echo     D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+    echo.
+    color 0A
+)
+
+:: -----------------------------------------------------------------------
+:: 6. Start the WhisperFlow daemon
 :: -----------------------------------------------------------------------
 echo.
 echo =======================================================================
 echo   Starting WhisperFlow Daemon...
 echo.
-echo   Backend:  Qwen3-ASR (1.7B, English, CrispASR)
-echo   Cleanup:  Rule-based (formatting.py)
+echo   Backend:  Qwen3-ASR (1.7B) + LLM cleanup (gemma-4)
 echo   Config:   config.llama4.toml
 echo.
 echo   Dictation hotkey:  Ctrl+Shift+Space  (hold to record)
