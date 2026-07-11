@@ -104,6 +104,7 @@ class TrayIcon:
     def _run(self) -> None:
         try:
             import pystray
+            from PIL import Image as PILImage
         except ImportError:
             sys.stderr.write(
                 "[whisper-flow] pystray not installed; tray icon disabled. "
