@@ -86,14 +86,17 @@ class Qwen3AsrBackend(TranscriptionBackend):
             cmd = [
                 c.qwen3_asr_bin,
                 "-m", c.qwen3_asr_model,
+                "--backend", "qwen3-1.7b",   # explicitly select Qwen3-ASR 1.7B backend
             ]
             if c.language and c.language.lower() != "auto":
                 cmd.extend(["-l", c.language])
             cmd.extend(["-t", str(c.threads)])
-            cmd.extend(["-bs", "5"])
             cmd.extend(["-nt", "-np"])
-            if initial_prompt:
-                cmd.extend(["--hotwords", initial_prompt])
+            # NOTE: We intentionally do NOT pass vocabulary biasing to Qwen3-ASR.
+            # --hotwords is granite-backend-only (ignored by Qwen3, may cause errors)
+            # --prompt injects text into the LLM context and can cause it to
+            # hallucinate those words instead of transcribing what was said.
+            # The dictionary is used for post-processing spell correction instead.
             cmd.append(audio_path)
             return cmd
 
