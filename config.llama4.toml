@@ -23,6 +23,11 @@ language = "auto"
 threads = 8
 flash_attention = false
 
+# Moonshine (added from remote, commented out)
+# backend = "moonshine"
+# language = "en"
+# threads = 8
+# flash_attention = false
 [audio]
 mic_backend = "sounddevice"
 mic_device = "default"
