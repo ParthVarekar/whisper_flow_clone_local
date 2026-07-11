@@ -204,10 +204,16 @@ class Daemon:
                 verbose=self.cfg.verbose,
             )
             self._capture.start()
-            # Start live preview loop in background (gives visual feedback during recording)
-            threading.Thread(
-                target=self._live_preview_loop, daemon=True
-            ).start()
+            # Live preview loop DISABLED for Qwen3-ASR — it's too slow (~1-2s per
+            # transcription) for real-time preview. Each preview call blocks the GPU,
+            # creating a queue that delays the final transcription after hotkey release.
+            # The overlay shows "Listening..." during recording instead.
+            #
+            # To re-enable for fast backends (whisper_cpp, moonshine), uncomment:
+            # if self.cfg.transcription.backend in ("whisper_cpp", "moonshine"):
+            #     threading.Thread(
+            #         target=self._live_preview_loop, daemon=True
+            #     ).start()
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"[whisper-flow] mic error: {exc}\n")
             self._overlay.error(str(exc))
@@ -282,6 +288,7 @@ class Daemon:
 
     def _process_dictation(self, duration: float, app_name: str, app_cat: str, window_title: str = "") -> None:
         """Transcribe, format, cleanup, and insert text."""
+        t_total_start = time.monotonic()  # timing: total processing
         capture = self._capture
         if capture is None:
             self._overlay.hide()
@@ -316,20 +323,27 @@ class Daemon:
                 biasing_words.extend(title_words[:8])  # keep top 8 title identifiers
             initial_p = ", ".join(biasing_words)
 
-            # Transcribe
+            # Transcribe (timed)
+            t_stt_start = time.monotonic()
             result = self._pipeline.stt.transcribe(
                 wav_path,
                 language=self.cfg.transcription.language,
                 initial_prompt=initial_p,
             )
+            stt_ms = (time.monotonic() - t_stt_start) * 1000
             transcript = result.text.strip()
 
             # Clean up temp file
             if wav_path and os.path.exists(wav_path):
                 os.remove(wav_path)
 
+            sys.stderr.write(f"[whisper-flow] ASR: {stt_ms:.0f}ms\n")
+
             if not transcript:
-                sys.stderr.write("[whisper-flow] empty transcript, ignoring\n")
+                sys.stderr.write(
+                    f"[whisper-flow] empty transcript, ignoring "
+                    f"(audio: {total_dur:.1f}s, ASR took {stt_ms:.0f}ms)\n"
+                )
                 self._overlay.hide()
                 if self._tray:
                     self._tray.set_state("idle")
@@ -364,12 +378,15 @@ class Daemon:
                     app_context=enriched_ctx,
                 )
                 try:
+                    t_llm_start = time.monotonic()
                     processed = self._pipeline.llm.process(
                         user,
                         system=system,
                         max_tokens=self.cfg.llm.max_tokens,
                         temperature=self.cfg.llm.temperature,
                     )
+                    llm_ms = (time.monotonic() - t_llm_start) * 1000
+                    sys.stderr.write(f"[whisper-flow] LLM: {llm_ms:.0f}ms\n")
                 except Exception as llm_exc:  # noqa: BLE001
                     # LLM server unreachable / errored — fall back to the raw
                     # rule-formatted transcript so dictation still works.
@@ -390,6 +407,10 @@ class Daemon:
 
             # Insert at cursor
             insert_text(processed, target_hwnd=getattr(self, "_target_hwnd", 0))
+
+            # Total processing time (from hotkey release to text insertion)
+            total_ms = (time.monotonic() - t_total_start) * 1000
+            sys.stderr.write(f"[whisper-flow] total: {total_ms:.0f}ms (ASR + format + LLM + insert)\n")
 
             # Display result in floating overlay HUD
             self._overlay.show_result(processed)
