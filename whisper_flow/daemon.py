@@ -74,6 +74,7 @@ class Daemon:
         self._hands_free = False
         self._running = False
         self._lock = threading.Lock()
+        self._preview_busy = False  # guard for live preview loop
 
         # Per-app style cache
         self._app_styles = getattr(cfg, "app_styles", {})
@@ -210,13 +211,12 @@ class Daemon:
                 self._overlay.set_writing_style(style_cfg["writing_style"])
 
         # Start mic capture
+        # Use a 6s rolling window for preview (faster ASR, more frequent updates)
+        # The full audio is still captured separately via snapshot_full()
         try:
             self._capture = LiveMicCapture(
                 self.cfg.audio,
-                max_window_seconds=max(
-                    self.cfg.audio.stream_max_s,
-                    self.cfg.audio.stream_chunk_s * 4,
-                ),
+                max_window_seconds=6,  # 6s rolling window for preview (was 12s)
                 on_amplitude=self._overlay.amplitude,
                 verbose=self.cfg.verbose,
             )
@@ -244,7 +244,6 @@ class Daemon:
         poll_s = 2.0  # 2s between preview transcriptions
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
-        self._preview_busy = False  # guard against overlapping transcriptions
 
         while True:
             time.sleep(poll_s)
@@ -292,6 +291,7 @@ class Daemon:
             if not self._recording:
                 return
             self._recording = False
+            self._preview_busy = True  # block any new preview transcriptions
 
         duration = time.monotonic() - self._record_start_time
         sys.stderr.write(f"[whisper-flow] recording stopped ({duration:.1f}s)\n")
