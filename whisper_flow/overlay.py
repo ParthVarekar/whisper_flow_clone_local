@@ -113,7 +113,7 @@ class OverlayNotifier:
     def show_result(self, text: str) -> None:
         """Show final transcribed & cleaned output with a typewriter reveal effect.
 
-        The text appears progressively (character-by-character) so the user sees
+        The text appears progressively (word-by-word) so the user sees
         the polished output appear, making the polishing step feel responsive
         and engaging rather than a sudden block of text.
         """
@@ -121,22 +121,23 @@ class OverlayNotifier:
             return
         display = text if len(text) <= 350 else text[:345] + "..."
 
-        # Send the full result immediately so the overlay switches to "done" state
-        self._q.put((_MSG_RESULT, display))
-
-        # Progressive typewriter reveal: send partial texts in chunks
-        # so the user sees the text appear word-by-word
+        # Progressive typewriter reveal: use PREVIEW (not RESULT) for the
+        # typing animation, then send RESULT once at the end. This prevents
+        # the "done" phase + auto-hide from triggering on each partial update.
         def _reveal_progressive():
             import time
             words = display.split(" ")
-            # Reveal in groups of 3-5 words for a natural reading speed
-            chunk_size = 4
+            chunk_size = 3  # 3 words per chunk for natural typing speed
             for i in range(0, len(words), chunk_size):
                 partial = " ".join(words[:i + chunk_size])
                 if i + chunk_size < len(words):
                     partial += " ▌"  # cursor block
-                self._q.put((_MSG_RESULT, partial))
-                time.sleep(0.04)  # 40ms between chunks
+                # Use PREVIEW during typing (doesn't trigger auto-hide)
+                self._q.put((_MSG_PREVIEW, partial))
+                time.sleep(0.05)  # 50ms between chunks
+
+            # Send the final RESULT (switches to "done" state with green dot)
+            self._q.put((_MSG_RESULT, display))
 
         threading.Thread(target=_reveal_progressive, daemon=True).start()
 

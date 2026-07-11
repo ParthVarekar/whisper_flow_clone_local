@@ -84,6 +84,23 @@ class Daemon:
         # Merge preserving order and uniqueness
         self._dictionary = base_dict + [w for w in learned_words if w not in base_dict]
 
+    def _stream_text_to_popup(self, text: str, words_per_chunk: int = 3, delay: float = 0.04) -> None:
+        """Stream text word-by-word to the popup overlay.
+
+        This makes the text appear progressively (typewriter effect) so the
+        user sees it being "typed" rather than appearing as a sudden block.
+        Used for both raw transcription reveal and LLM polishing reveal.
+        """
+        if not text:
+            return
+        words = text.split()
+        for i in range(0, len(words), words_per_chunk):
+            partial = " ".join(words[:i + words_per_chunk])
+            if i + words_per_chunk < len(words):
+                partial += " ▌"  # cursor block
+            self._overlay.preview(partial)
+            time.sleep(delay)
+
     def run(self) -> None:
         """Start the daemon (blocking). Call from main thread."""
         self._running = True
@@ -351,10 +368,14 @@ class Daemon:
 
             sys.stderr.write(f"[whisper-flow] transcript:\n{transcript}\n")
 
-            # Show raw transcript in the popup immediately so the user sees
-            # progress while the LLM is polishing. This keeps the user engaged
-            # during the ~1-2s LLM cleanup step.
-            self._overlay.show("Transcribed ✏️ Polishing...")
+            # Stream the raw transcript word-by-word to the popup so the user
+            # sees it appear progressively (not a sudden block of text).
+            self._overlay.show("Transcribing ✏️")
+            self._stream_text_to_popup(transcript)
+
+            # Brief pause so user can read the raw transcript before polishing
+            time.sleep(0.3)
+            self._overlay.show("Polishing ✨...")
             self._overlay.preview(transcript)
 
             # Apply smart formatting

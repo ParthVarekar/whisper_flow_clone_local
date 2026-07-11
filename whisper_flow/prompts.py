@@ -44,8 +44,13 @@ SYSTEM_PROMPTS = {
         "7. Normalize numbers ('twenty five' → '25', 'three thirty pm' → '3:30 PM')\n"
         "8. Remove repetition and stuttering\n"
         "9. Preserve the speaker's meaning, tone, and language\n"
-        "10. Output ONLY the cleaned text — no labels, no quotes, no explanations\n"
-        "Keep it natural and readable, like a well-edited first draft."
+        "10. Output ONLY the cleaned text — no labels, no quotes, no explanations\n\n"
+        "FORMATTING RULES (Wispr Flow style):\n"
+        "- If the speaker is listing multiple items, features, or steps, format them as "
+        "a bulleted list with '-' or numbered list (1. 2. 3.). Each item on its own line.\n"
+        "- If the speaker is describing a single thought or paragraph, keep it as prose.\n"
+        "- Add line breaks between distinct ideas or topics for readability.\n"
+        "- Keep it natural and readable, like a well-edited first draft."
     ),
     "smart_list": (
         "You are a formatting assistant. Convert the provided speech transcript "
