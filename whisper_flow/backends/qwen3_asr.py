@@ -92,8 +92,26 @@ class Qwen3AsrBackend(TranscriptionBackend):
             cmd.extend(["-t", str(c.threads)])
             cmd.extend(["-bs", "5"])  # beam search — helps produce coherent output
             cmd.extend(["-nt", "-np"])
+            # Contextual biasing for proper noun recognition.
+            #
+            # RESEARCH (see PROGRESS.md):
+            # Qwen3-ASR does NOT support --hotwords (that's granite-backend-only,
+            # silently ignored by Qwen3). Instead, Qwen3-ASR uses the system prompt
+            # for contextual biasing. The technical report says:
+            #   "the model learns to utilize the context tokens inside the system
+            #    prompt as background knowledge"
+            #
+            # CrispASR's --prompt flag passes text into the LLM context. We format
+            # the vocabulary as a natural-language context string so Qwen3-ASR
+            # treats it as background knowledge to bias recognition.
+            #
+            # Format: "Terms that may appear: X, Y, Z. Use these exact spellings."
             if initial_prompt:
-                cmd.extend(["--hotwords", initial_prompt])  # vocabulary biasing — helps proper nouns
+                context = (
+                    f"Terms that may appear in the audio: {initial_prompt}. "
+                    f"Use these exact spellings when the audio contains these terms."
+                )
+                cmd.extend(["--prompt", context])
             cmd.append(audio_path)
             return cmd
 

@@ -15,10 +15,13 @@
 
 **CrispASR command (working):**
 ```
-crispasr.exe -m <model> -l auto -t 8 -bs 5 -nt -np --hotwords <vocabulary> <audio.wav>
+crispasr.exe -m <model> -l auto -t 8 -bs 5 -nt -np --prompt <context> <audio.wav>
 ```
 - `-bs 5` — beam search (HELPS, do not remove)
-- `--hotwords` — vocabulary biasing (HELPS proper noun recognition, do not remove)
+- `--prompt` — contextual biasing via Qwen3-ASR system prompt (HELPS proper nouns)
+  - Format: "Terms that may appear in the audio: X, Y, Z. Use these exact spellings..."
+  - Qwen3-ASR does NOT support `--hotwords` (granite-backend-only, silently ignored)
+  - The model uses the prompt as "background knowledge" per the technical report
 
 **LLM cleanup:** mode="auto" uses llama-server + gemma-4-E4B-it for post-processing.
 The LLM polishes the raw Qwen3-ASR transcript — fixes grammar, removes fillers,
@@ -135,14 +138,20 @@ For LLM cleanup: needs `llama-server.exe` + `gemma-4-E4B-it.gguf` (not pip — s
    is decent but has errors. The LLM (gemma-4) polishes it into clean, formatted text.
    Do not set mode="raw" unless you have a specific reason and accept lower quality.
 
-3. **Beam search (`-bs 5`) and hotwords (`--hotwords`) HELP.** Do not remove them.
-   They were incorrectly identified as bugs in Phase 3 — they were actually helping.
+3. **Beam search (`-bs 5`) HELP.** Do not remove it. It was incorrectly identified as
+   a bug in Phase 3 — it actually helps produce coherent output.
 
-4. **Audio preprocessing is NOT needed.** The silence trim + noise gate + filter + normalize
+4. **Use `--prompt` for vocabulary biasing, NOT `--hotwords`.** Qwen3-ASR does NOT
+   support `--hotwords` (that's granite-backend-only, silently ignored). Instead,
+   use `--prompt` with a natural-language context string. Qwen3-ASR treats the
+   prompt as "background knowledge" per the technical report. Format:
+   "Terms that may appear in the audio: X, Y, Z. Use these exact spellings..."
+
+5. **Audio preprocessing is NOT needed.** The silence trim + noise gate + filter + normalize
    pipeline did not improve accuracy and added latency. Qwen3-ASR handles noise well enough
    on its own.
 
-5. **Live preview is useful.** It gives visual feedback during recording. Keep it enabled.
+6. **Live preview is useful.** It gives visual feedback during recording. Keep it enabled.
 
 ---
 
