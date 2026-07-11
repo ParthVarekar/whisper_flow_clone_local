@@ -1,0 +1,13 @@
+# Tauri build artifacts
+/target/
+/gen/
+
+# Tauri icons (generated from source)
+icons/*.ico
+icons/*.icns
+icons/32x32.png
+icons/128x128.png
+icons/128x128@2x.png
+
+# Keep the source icon if present
+!icons/icon-source.svg
