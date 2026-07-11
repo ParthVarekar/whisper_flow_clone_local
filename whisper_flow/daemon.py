@@ -245,7 +245,7 @@ class Daemon:
         This shows the user a growing transcript (sentences appear one below
         the other) instead of replacing the text each time.
         """
-        poll_s = 1.0  # 1s poll
+        poll_s = 0.2  # 0.2s poll — text appears as fast as possible
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
 

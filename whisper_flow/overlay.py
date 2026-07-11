@@ -261,10 +261,12 @@ class OverlayNotifier:
             """Resize the popup to fit the content dynamically.
 
             Width: 560px (stable)
-            Height: 130px base, +20px per line, up to 500px max
+            Height: 130px base, +20px per line, up to 50% of screen height
             Called on every PREVIEW and RESULT message so the popup grows
             as text is added during the typewriter reveal.
             """
+            screen_h = root.winfo_screenheight()
+            max_h = screen_h // 2  # 50% of screen height
             if not text:
                 w, h = 560, 130
             else:
@@ -278,10 +280,10 @@ class OverlayNotifier:
                     lines += max(1, (line_len + chars_per_line - 1) // chars_per_line)
                 lines = max(1, lines)
                 w = 560  # keep width stable
-                h = min(500, max(130, 70 + lines * 20))
+                h = min(max_h, max(130, 70 + lines * 20))
             sw = root.winfo_screenwidth()
             x = (sw - w) // 2
-            y = root.winfo_screenheight() - h - 70
+            y = screen_h - h - 70
             root.geometry(f"{w}x{h}+{x}+{y}")
             # Force the window manager to apply the resize immediately
             try:
