@@ -163,9 +163,20 @@ class Qwen3AsrBackend(TranscriptionBackend):
             except OSError:
                 pass
 
-        if is_chunked and self.verbose:
+        if is_chunked:
             import sys
-            sys.stderr.write(f"[qwen3-asr] chunked into {len(chunk_paths)} segments\n")
+            import wave as _wave
+            chunk_sizes = []
+            for cp in chunk_paths:
+                try:
+                    with _wave.open(cp, "rb") as _w:
+                        chunk_sizes.append(f"{_w.getnframes()/_w.getframerate():.1f}s")
+                except Exception:
+                    chunk_sizes.append("?s")
+            sys.stderr.write(
+                f"[qwen3-asr] chunked into {len(chunk_paths)} segments: "
+                f"{' + '.join(chunk_sizes)}\n"
+            )
 
         all_texts: list[str] = []
         all_stderr: list[str] = []
@@ -187,12 +198,14 @@ class Qwen3AsrBackend(TranscriptionBackend):
                 chunk_idx=chunk_idx if is_chunked else None,
             )
 
-            # Clean up chunk temp file (unless it's the original)
-            if chunk_path != audio_path:
-                try:
-                    _os.remove(chunk_path)
-                except OSError:
-                    pass
+            # Clean up chunk temp file (chunk files are always temp files
+            # created by chunk_wav_on_silence — the original/amplified file
+            # is never in chunk_paths when is_chunked=True because chunking
+            # creates new files. Safe to always remove.)
+            try:
+                _os.remove(chunk_path)
+            except OSError:
+                pass
 
             if chunk_text:
                 all_texts.append(chunk_text)

@@ -22,7 +22,7 @@ model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
 qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
 qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
 qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
-language = "auto"
+language = "en"
 threads = 8
 flash_attention = false
 
