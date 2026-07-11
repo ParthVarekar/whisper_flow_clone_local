@@ -143,19 +143,25 @@ class Qwen3AsrBackend(TranscriptionBackend):
         self.check()
         self._cancel_requested = False
 
+        # Apply automatic gain control (AGC) before transcription.
+        # Qwen3-ASR needs a strong signal — quiet speech gets garbled.
+        # AGC amplifies quiet audio to a target RMS level so the model
+        # gets consistent volume regardless of how loud the user speaks.
+        amplified_path = self._apply_agc(audio_path)
+
         # Chunk long audio using ADAPTIVE chunking.
-        # The chunk size adapts to recording length:
-        #   <=14s: no split (1 chunk, fast)
-        #   14-28s: 14s max (2 chunks)
-        #   28-42s: 12s max (3 chunks)
-        #   42s+: 10s max (5+ chunks, best accuracy)
-        # This balances speed (fewer GPU calls for short audio) with accuracy
-        # (smaller chunks for long audio where Qwen3-ASR would degrade).
         from ..audio import chunk_wav_on_silence
         import os as _os
 
-        chunk_paths = chunk_wav_on_silence(audio_path)  # adaptive (None)
+        chunk_paths = chunk_wav_on_silence(amplified_path)  # adaptive (None)
         is_chunked = len(chunk_paths) > 1
+
+        # Clean up the amplified temp file (if different from original)
+        if amplified_path != audio_path:
+            try:
+                _os.remove(amplified_path)
+            except OSError:
+                pass
 
         if is_chunked and self.verbose:
             import sys
@@ -281,6 +287,100 @@ class Qwen3AsrBackend(TranscriptionBackend):
 
             raw_text = "\n".join(stdout_lines).strip()
             return self._clean_output(raw_text)
+
+    def _apply_agc(self, wav_path: str) -> str:
+        """Apply automatic gain control to amplify quiet audio.
+
+        Qwen3-ASR needs a strong signal for accurate transcription. When the
+        user speaks quietly, the audio level is too low and the model garbles
+        the output. AGC amplifies the audio to a target RMS level so the model
+        gets consistent volume regardless of how loud the user speaks.
+
+        Returns the path to the amplified WAV file (may be the same as input
+        if no amplification was needed, or a new temp file).
+        """
+        try:
+            import numpy as np
+            import wave
+            import tempfile
+            import os
+        except ImportError:
+            return wav_path
+
+        try:
+            with wave.open(wav_path, "rb") as w:
+                sr = w.getframerate()
+                nch = w.getnchannels()
+                sampwidth = w.getsampwidth()
+                nframes = w.getnframes()
+                raw = w.readframes(nframes)
+
+            if sampwidth != 2:
+                return wav_path  # only handle 16-bit
+
+            samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            if nch > 1:
+                samples = samples[::nch]
+
+            if len(samples) == 0:
+                return wav_path
+
+            # Calculate RMS of the speech portion (ignore silence)
+            # Use the 90th percentile of frame RMS to estimate speech level
+            frame_len = int(0.02 * sr)  # 20ms frames
+            n_frames = len(samples) // frame_len
+            if n_frames < 2:
+                return wav_path
+
+            frames = samples[:n_frames * frame_len].reshape(n_frames, frame_len)
+            frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
+            # Speech level = 90th percentile (ignores silence at the bottom)
+            speech_rms = float(np.percentile(frame_rms, 90))
+
+            if speech_rms < 0.001:
+                return wav_path  # too quiet to amplify meaningfully
+
+            # Target RMS: 0.15 (moderate speech level, not too loud to clip)
+            target_rms = 0.15
+
+            # Calculate gain needed (cap at 10x to avoid amplifying noise)
+            gain = min(10.0, target_rms / speech_rms)
+
+            # Only amplify if gain > 1.2 (don't attenuate loud speech)
+            if gain < 1.2:
+                return wav_path  # already loud enough
+
+            # Apply gain
+            amplified = samples * gain
+
+            # Clip to prevent distortion
+            amplified = np.clip(amplified, -1.0, 1.0)
+
+            # Write to new temp file
+            int16_audio = (amplified * 32767.0).astype(np.int16)
+            tmp = tempfile.NamedTemporaryFile(
+                prefix="wf_agc_", suffix=".wav", delete=False, dir=tempfile.gettempdir()
+            )
+            out_path = tmp.name
+            tmp.close()
+
+            with wave.open(out_path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sr)
+                w.writeframes(int16_audio.tobytes())
+
+            if self.verbose:
+                import sys
+                sys.stderr.write(
+                    f"[qwen3-asr] AGC: gain={gain:.1f}x "
+                    f"(speech_rms={speech_rms:.3f} → target={target_rms})\n"
+                )
+
+            return out_path
+
+        except Exception:
+            return wav_path  # on any error, return original
 
     @staticmethod
     def _clean_output(text: str) -> str:
