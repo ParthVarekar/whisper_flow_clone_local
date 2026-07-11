@@ -438,22 +438,33 @@ def _write_wav_chunk(arr, sample_rate: int, channels: int) -> str:
 def chunk_wav_on_silence(
     wav_path: str,
     *,
-    max_chunk_seconds: float = 8.0,
+    max_chunk_seconds: float | None = None,
     silence_threshold_db: float = -35.0,
     min_silence_ms: int = 300,
     sample_rate: int = 16000,
 ) -> list[str]:
     """Split a WAV file into chunks at silence boundaries.
 
-    Qwen3-ASR (and most ASR models) degrade on long audio (>12s). The rolling
-    preview window was more accurate than the full-audio transcription because
-    it processed shorter segments. This function splits long recordings into
-    ~8s chunks at silence boundaries, so each chunk is short enough for
-    accurate transcription.
+    Qwen3-ASR (and most ASR models) degrade on long audio (>12s). This function
+    splits long recordings into chunks at silence boundaries for accurate
+    transcription.
+
+    ADAPTIVE CHUNKING (when max_chunk_seconds is None):
+    The chunk size adapts to the recording length — shorter recordings use
+    larger chunks (fewer GPU calls = faster), longer recordings use smaller
+    chunks (more chunks = better accuracy per chunk).
+
+    | Recording length | Max chunk size | ~Num chunks |
+    |------------------|----------------|-------------|
+    | <= 14s           | 14s (no split) | 1           |
+    | 14-28s           | 14s            | 2           |
+    | 28-42s           | 12s            | 3           |
+    | 42s+             | 10s            | 5+          |
 
     Args:
         wav_path: Path to the input WAV file (16kHz mono int16).
-        max_chunk_seconds: Maximum chunk length (default 8s).
+        max_chunk_seconds: Maximum chunk length. If None (default), uses
+            adaptive chunking based on total audio duration.
         silence_threshold_db: dB threshold for silence detection (default -35dB).
         min_silence_ms: Minimum silence duration to split on (default 300ms).
         sample_rate: Expected sample rate.
@@ -484,6 +495,18 @@ def chunk_wav_on_silence(
         return [wav_path]
 
     total_dur = len(samples) / sr
+
+    # Adaptive chunk size: longer audio → smaller chunks (more accurate)
+    if max_chunk_seconds is None:
+        if total_dur <= 14.0:
+            max_chunk_seconds = 14.0  # no split needed
+        elif total_dur <= 28.0:
+            max_chunk_seconds = 14.0  # 2 chunks
+        elif total_dur <= 42.0:
+            max_chunk_seconds = 12.0  # 3 chunks
+        else:
+            max_chunk_seconds = 10.0  # 5+ chunks, best accuracy
+
     # If already short enough, no need to chunk
     if total_dur <= max_chunk_seconds:
         return [wav_path]
@@ -519,22 +542,19 @@ def chunk_wav_on_silence(
                 silence_runs.append((run_start, run_end))
             in_silence = False
 
-    # Build split points: split at every silence boundary where the current
-    # chunk is >= 3 seconds. This keeps chunks in the 3-8s range, which is
-    # optimal for Qwen3-ASR accuracy.
+    # Build split points: only split when the current chunk reaches max_chunk_seconds.
+    # We prefer to split at silence boundaries (natural pauses) rather than mid-word.
     chunks: list[np.ndarray] = []
     chunk_start = 0
     max_chunk_samples = int(max_chunk_seconds * sr)
-    min_chunk_samples = int(3.0 * sr)  # don't create chunks shorter than 3s
 
     for s_start, s_end in silence_runs:
         s_start_sample = s_start * frame_len
         s_end_sample = s_end * frame_len
         mid = (s_start_sample + s_end_sample) // 2
         chunk_len = mid - chunk_start
-        # Split if current chunk is >= 3s (avoid tiny chunks)
-        # OR if current chunk would exceed max_chunk_seconds
-        if chunk_len >= min_chunk_samples or chunk_len >= max_chunk_samples:
+        # Only split when the chunk has reached max_chunk_seconds
+        if chunk_len >= max_chunk_samples:
             chunks.append(samples[chunk_start:mid])
             chunk_start = mid
 
@@ -551,6 +571,24 @@ def chunk_wav_on_silence(
         else:
             final_chunks.append(chunk)
     chunks = final_chunks
+
+    # Merge tiny chunks (< 2s) into the previous chunk to avoid wasting
+    # GPU calls on near-empty audio. Only merge if the result stays under
+    # max_chunk_seconds * 1.5 (gives some headroom for the merge).
+    min_useful_samples = int(2.0 * sr)
+    max_merge_samples = int(max_chunk_seconds * 1.5 * sr)
+    merged: list[np.ndarray] = []
+    for chunk in chunks:
+        if len(chunk) < min_useful_samples and merged:
+            # Try to merge with previous chunk
+            if len(merged[-1]) + len(chunk) <= max_merge_samples:
+                merged[-1] = np.concatenate([merged[-1], chunk])
+            else:
+                # Previous chunk is too full; merge with next instead (skip for now)
+                merged.append(chunk)
+        else:
+            merged.append(chunk)
+    chunks = merged
 
     # Write each chunk to a temp WAV file
     chunk_paths: list[str] = []

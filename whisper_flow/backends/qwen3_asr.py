@@ -143,14 +143,18 @@ class Qwen3AsrBackend(TranscriptionBackend):
         self.check()
         self._cancel_requested = False
 
-        # Chunk long audio into ~8s segments at silence boundaries.
-        # Qwen3-ASR degrades on long audio (>12s) — the rolling preview window
-        # was more accurate than full-audio transcription because it processed
-        # shorter segments. Chunking gives the same benefit.
+        # Chunk long audio using ADAPTIVE chunking.
+        # The chunk size adapts to recording length:
+        #   <=14s: no split (1 chunk, fast)
+        #   14-28s: 14s max (2 chunks)
+        #   28-42s: 12s max (3 chunks)
+        #   42s+: 10s max (5+ chunks, best accuracy)
+        # This balances speed (fewer GPU calls for short audio) with accuracy
+        # (smaller chunks for long audio where Qwen3-ASR would degrade).
         from ..audio import chunk_wav_on_silence
         import os as _os
 
-        chunk_paths = chunk_wav_on_silence(audio_path, max_chunk_seconds=8.0)
+        chunk_paths = chunk_wav_on_silence(audio_path)  # adaptive (None)
         is_chunked = len(chunk_paths) > 1
 
         if is_chunked and self.verbose:
