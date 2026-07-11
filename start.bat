@@ -5,7 +5,7 @@ cd /d "%~dp0"
 cls
 echo =======================================================================
 echo               WHISPER FLOW - ONE-CLICK LAUNCHER
-echo            whisper.cpp (base.en) + rule-based cleanup
+echo            Qwen3-ASR (1.7B) + rule-based cleanup
 echo =======================================================================
 echo.
 
@@ -24,7 +24,6 @@ if %ERRORLEVEL% NEQ 0 (
 
 :: -----------------------------------------------------------------------
 :: 2. Activate virtual environment if one exists (recommended)
-::    Looks for .venv or .qa-venv in the project root.
 :: -----------------------------------------------------------------------
 set "VENV_DIR="
 if exist ".qa-venv\Scripts\activate.bat" set "VENV_DIR=.qa-venv"
@@ -82,63 +81,58 @@ if %ERRORLEVEL% NEQ 0 (
     )
 )
 
-:: Also install moonshine-voice (optional, for users who want to switch
-:: to the faster-but-less-accurate Moonshine backend)
-python -c "import moonshine_voice" >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo [INSTALL] Installing moonshine-voice ^(optional backend, ~80MB^)...
-    python -m pip install moonshine-voice
-)
-
 :: -----------------------------------------------------------------------
-:: 4. Verify whisper.cpp binary and model exist
+:: 4. Verify Qwen3-ASR binary and model files exist
 :: -----------------------------------------------------------------------
-echo [CHECK] Verifying whisper.cpp installation...
+echo [CHECK] Verifying Qwen3-ASR installation...
 
-set "WHISPER_BIN=C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe"
-set "WHISPER_MODEL=C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin"
+set "QWEN_BIN=C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe"
+set "QWEN_MODEL=C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf"
+set "QWEN_MMPROJ=C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf"
 
-if not exist "%WHISPER_BIN%" (
+set "ALL_FOUND=1"
+
+if not exist "%QWEN_BIN%" (
     color 0E
-    echo [WARNING] whisper-cli.exe not found at:
-    echo   %WHISPER_BIN%
+    echo [WARNING] crispasr.exe not found at:
+    echo   %QWEN_BIN%
     echo.
-    echo The daemon will fail to transcribe. Either:
-    echo   1. Install whisper.cpp at the expected path, OR
-    echo   2. Edit config.llama4.toml to use a different backend (moonshine/qwen3_asr)
-    echo.
+    set "ALL_FOUND=0"
     color 0A
 )
 
-if not exist "%WHISPER_MODEL%" (
+if not exist "%QWEN_MODEL%" (
     color 0E
-    echo [WARNING] ggml-base.en.bin model not found at:
-    echo   %WHISPER_MODEL%
+    echo [WARNING] Qwen3-ASR model not found at:
+    echo   %QWEN_MODEL%
     echo.
-    echo Download it with:
-    echo   cd C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp
-    echo   bash models\download-ggml-model.sh base.en
-    echo   move models\ggml-base.en.bin C:\Users\Parth\Desktop\whisper\models\
-    echo.
+    set "ALL_FOUND=0"
     color 0A
 )
 
-if exist "%WHISPER_BIN%" if exist "%WHISPER_MODEL%" (
-    echo [OK] whisper.cpp binary and model found.
+if "%ALL_FOUND%"=="1" (
+    echo [OK] Qwen3-ASR binary and model found.
+) else (
+    echo [ERROR] Qwen3-ASR files are missing. The daemon will fail to transcribe.
+    echo.
+    echo To use a different backend, edit config.llama4.toml:
+    echo   - whisper_cpp: needs whisper-cli.exe + ggml-*.bin model
+    echo   - moonshine:   needs 'pip install moonshine-voice' (in-process, no binary)
+    echo.
 )
 
 :: -----------------------------------------------------------------------
 :: 5. Start the WhisperFlow daemon
 ::    Config: config.llama4.toml
-::      - backend = "whisper_cpp"  (whisper-cli + ggml-base.en, 74M params)
-::      - language = "en"          (English-only model)
-::      - mode = "raw"             (rule-based cleanup, no LLM needed)
+::      - backend = "qwen3_asr"  (1.7B speech-LLM, most accurate)
+::      - language = "en"        (English)
+::      - mode = "raw"           (rule-based cleanup, no LLM needed)
 :: -----------------------------------------------------------------------
 echo.
 echo =======================================================================
 echo   Starting WhisperFlow Daemon...
 echo.
-echo   Backend:  whisper.cpp + base.en (74M, English)
+echo   Backend:  Qwen3-ASR (1.7B, English, CrispASR)
 echo   Cleanup:  Rule-based (formatting.py)
 echo   Config:   config.llama4.toml
 echo.

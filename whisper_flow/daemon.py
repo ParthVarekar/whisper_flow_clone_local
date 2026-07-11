@@ -204,10 +204,14 @@ class Daemon:
                 verbose=self.cfg.verbose,
             )
             self._capture.start()
-            # Start live preview loop in background
-            threading.Thread(
-                target=self._live_preview_loop, daemon=True
-            ).start()
+            # Live preview loop disabled — Qwen3-ASR is too slow (~1-2s) for
+            # real-time preview, and the extra transcriptions waste CPU.
+            # The overlay shows "Listening..." during recording and the final
+            # transcript appears after the hotkey is released.
+            # To re-enable, uncomment the next 3 lines:
+            # threading.Thread(
+            #     target=self._live_preview_loop, daemon=True
+            # ).start()
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"[whisper-flow] mic error: {exc}\n")
             self._overlay.error(str(exc))

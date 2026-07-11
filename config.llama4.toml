@@ -1,29 +1,31 @@
-# WhisperFlow configuration — Whisper.cpp + rule-based cleanup
+# WhisperFlow configuration — Qwen3-ASR + rule-based cleanup
 #
-# Architecture decision (revised July 2026):
-#   ASR backend  = whisper.cpp with ggml-base.en (74M params)
+# Architecture decision (revised July 2026, iteration 3):
+#   ASR backend  = Qwen3-ASR (1.7B speech-LLM via CrispASR)
 #   Cleanup      = rule-based (formatting.py)
 #   LLM cleanup  = OFF by default (mode="raw") for fast, no-server operation
 #
-# WHY NOT MOONSHINE?
-#   Moonshine Tiny (27M) was too small for real-world desktop/laptop mic
-#   capture at a distance. It produced hallucinated transcripts that didn't
-#   match what was spoken. Whisper Base (74M) is 2.8x larger and handles
-#   distant mic capture + background noise far better.
+# WHY NOT Moonshine Tiny (27M)?
+#   Too small for desktop/distant mic. Produced complete hallucinations.
 #
-# To switch back to Moonshine (for close-mic / headset use):
-#   1. Set backend = "moonshine" below
-#   2. Comment out whisper_bin + model
-#   3. Moonshine runs in-process (no external binary needed)
+# WHY NOT whisper.cpp base.en (74M)?
+#   Also too small for this mic setup. Produced garbled transcripts:
+#   "test 3" → "destitute", "pronunciation" → "constitution"
 #
-# To ENABLE LLM cleanup (requires llama-server running on port 8081):
-#   1. Set mode = "auto" below
-#   2. Start llama-server:
-#      D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL \
-#        --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 \
-#        --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
-#   3. If the LLM server is unreachable, the daemon automatically falls back
-#      to the raw rule-formatted transcript.
+# WHY Qwen3-ASR (1.7B)?
+#   - User confirmed it works accurately with their mic setup
+#   - 1.7B params (23x larger than base.en) handles distant mic + noise
+#   - Speech-LLM specifically designed for ASR (not a general model)
+#   - Already installed: crispasr.exe + qwen3-asr-1.7b-q4_k.gguf + mmproj
+#
+# ALTERNATIVE: Whisper medium.en (769M)
+#   If you want to try a larger Whisper model instead:
+#   1. Download: cd third_party/whisper.cpp && bash models/download-ggml-model.sh medium.en
+#   2. Move: move models\ggml-medium.en.bin ..\models\
+#   3. Edit this config: backend = "whisper_cpp", model = '...ggml-medium.en.bin'
+#
+# To ENABLE LLM cleanup (requires llama-server on port 8081):
+#   Set mode = "auto" and start llama-server (see [llm] section below)
 #
 # ---------------------------------------------------------------------------
 
@@ -37,27 +39,23 @@ command_hotkey = "ctrl+shift+t"
 dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API"]
 
 [transcription]
-# Primary backend: whisper.cpp with ggml-base.en (74M, English-only)
-# Much more accurate than Moonshine Tiny for desktop/distant mic capture.
-backend = "whisper_cpp"
-whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
-model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
-language = "en"           # English-only model; always "en"
+# Primary backend: Qwen3-ASR (1.7B, most accurate for this mic setup)
+backend = "qwen3_asr"
+qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
+qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
+qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
+language = "en"           # "en" for English; "auto" for auto-detect
 threads = 8
-flash_attention = true
 
-# Alternative backend: Moonshine Tiny (27M, in-process ONNX)
-# Faster (~50ms vs ~500ms) but less accurate for distant mic.
-# To use: uncomment these lines and comment out the whisper_cpp lines above.
+# Alternative: whisper.cpp with a LARGER model (medium.en = 769M)
+# To use: download medium.en, then uncomment these lines:
+# backend = "whisper_cpp"
+# whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
+# model = 'C:\Users\Parth\Desktop\whisper\models\ggml-medium.en.bin'
+# flash_attention = true
+
+# Alternative: Moonshine Tiny (27M, fast but inaccurate for distant mic)
 # backend = "moonshine"
-# language = "en"
-
-# Alternative backend: Qwen3-ASR (1.7B, most accurate but needs crispasr.exe)
-# To use: uncomment these lines and comment out the whisper_cpp lines above.
-# backend = "qwen3_asr"
-# qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
-# qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
-# qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
 
 [audio]
 mic_backend = "sounddevice"
@@ -67,7 +65,7 @@ stream_chunk_s = 1
 stream_max_s = 12
 
 [llm]
-# Only used when mode = "auto" (or "light"/"medium"/"high"/"summarize"/etc.)
+# Only used when mode = "auto"
 # When mode = "raw", this section is ignored — no LLM server is contacted.
 mode = "server"
 llama_server_bin = 'D:\llama4\llama-server.exe'
