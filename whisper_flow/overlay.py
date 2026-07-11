@@ -248,14 +248,34 @@ class OverlayNotifier:
         self._root = root
         self._ready.set()
 
-        # Position at bottom-center of screen
-        def _position():
+        # Dynamic popup sizing — resize based on content length
+        def _resize_for_content(text: str):
+            """Resize the popup to fit the content dynamically.
+
+            Width: 560px base, up to 720px for long lines
+            Height: 130px base, +18px per line beyond 2 lines, up to 400px max
+            """
+            if not text:
+                w, h = 560, 130
+            else:
+                # Estimate lines based on wraplength and text length
+                wrap = 530
+                chars_per_line = wrap // 8  # ~8px per char at 10pt
+                # Count explicit newlines (list items) + wrapped lines
+                lines = 0
+                for line in text.split("\n"):
+                    line_len = max(1, len(line))
+                    lines += max(1, (line_len + chars_per_line - 1) // chars_per_line)
+                lines = max(1, lines)
+                w = min(720, max(560, 560))  # keep width stable at 560
+                h = min(400, max(130, 70 + lines * 20))
             sw = root.winfo_screenwidth()
-            w = 560
-            h = 130
             x = (sw - w) // 2
             y = root.winfo_screenheight() - h - 70
             root.geometry(f"{w}x{h}+{x}+{y}")
+
+        def _position():
+            _resize_for_content("")
 
         _position()
 
@@ -362,8 +382,10 @@ class OverlayNotifier:
                         root.withdraw()
                         meter_level[0] = 0.0
                         content_var.set("")
+                        _resize_for_content("")
                     elif msg_type == _MSG_PREVIEW:
                         content_var.set(f"🎙️ \"{data}\"")
+                        _resize_for_content(str(data))
                     elif msg_type == _MSG_STATUS:
                         status_var.set(str(data))
                     elif msg_type == _MSG_PROCESSING:
@@ -375,19 +397,21 @@ class OverlayNotifier:
                         status_var.set("✨ Post-processed Output")
                         status_lbl.configure(fg="#4ade80")
                         content_var.set(f"\"{data}\"")
+                        _resize_for_content(str(data))
                         phase[0] = "done"
                         dot.delete("all")
                         dot.create_oval(2, 2, 12, 12, fill="#22c55e", outline="")
                         # Dynamic auto-hide: longer text stays longer.
-                        # Formula: 3s base + 0.05s per word, capped at 15s max.
+                        # Formula: 5s base + 0.08s per word, capped at 30s max.
                         # Examples:
-                        #   10 words → 3.5s
-                        #   30 words → 4.5s
-                        #   50 words → 5.5s
-                        #   100 words → 8s
-                        #   200+ words → 15s (max)
+                        #   10 words → 5.8s
+                        #   30 words → 7.4s
+                        #   50 words → 9s
+                        #   100 words → 13s
+                        #   200+ words → 21s
+                        #   300+ words → 30s (max)
                         word_count = len(str(data).split())
-                        hide_delay_ms = min(15000, int(3000 + word_count * 50))
+                        hide_delay_ms = min(30000, int(5000 + word_count * 80))
                         root.after(hide_delay_ms, lambda: self.hide() if phase[0] == "done" else None)
                     elif msg_type == _MSG_AMPLITUDE:
                         rms = float(data)

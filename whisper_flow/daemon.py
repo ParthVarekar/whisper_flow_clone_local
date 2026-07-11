@@ -221,16 +221,13 @@ class Daemon:
                 verbose=self.cfg.verbose,
             )
             self._capture.start()
-            # Live preview loop DISABLED for Qwen3-ASR — it's too slow (~1-2s per
-            # transcription) for real-time preview. Each preview call blocks the GPU,
-            # creating a queue that delays the final transcription after hotkey release.
-            # The overlay shows "Listening..." during recording instead.
-            #
-            # To re-enable for fast backends (whisper_cpp, moonshine), uncomment:
-            # if self.cfg.transcription.backend in ("whisper_cpp", "moonshine"):
-            #     threading.Thread(
-            #         target=self._live_preview_loop, daemon=True
-            #     ).start()
+            # Start live preview loop — transcribes the rolling window periodically
+            # so the user sees text appear in the popup DURING recording.
+            # Uses a 4s poll interval to avoid GPU queue buildup (Qwen3-ASR takes
+            # ~2-5s per transcription, so 4s gap prevents overlap).
+            threading.Thread(
+                target=self._live_preview_loop, daemon=True
+            ).start()
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"[whisper-flow] mic error: {exc}\n")
             self._overlay.error(str(exc))
@@ -238,8 +235,13 @@ class Daemon:
                 self._recording = False
 
     def _live_preview_loop(self) -> None:
-        """Periodically transcribe a rolling window and show partial text in overlay."""
-        poll_s = max(0.8, float(self.cfg.audio.stream_chunk_s) * 0.6)
+        """Periodically transcribe a rolling window and show partial text in overlay.
+
+        Uses a 4-second poll interval so Qwen3-ASR (which takes ~2-5s per
+        transcription) doesn't queue up multiple calls. This gives the user
+        live text feedback during recording without blocking the GPU.
+        """
+        poll_s = 4.0  # 4s between preview transcriptions (avoids GPU queue)
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
 
