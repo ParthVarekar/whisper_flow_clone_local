@@ -4,7 +4,8 @@ from whisper_flow.formatting import apply_smart_formatting
 def test_replaces_spoken_punctuation_and_newlines():
     text = "hello comma world new paragraph next line thanks period"
     out = apply_smart_formatting(text)
-    assert out == "hello, world\n\nthanks."
+    # Capitalization now correctly capitalizes sentence/paragraph starts
+    assert out == "Hello, world\n\nThanks."
 
 
 def test_press_enter_appends_newline():
