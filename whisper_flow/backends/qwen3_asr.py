@@ -143,14 +143,87 @@ class Qwen3AsrBackend(TranscriptionBackend):
         self.check()
         self._cancel_requested = False
 
+        # Chunk long audio into ~8s segments at silence boundaries.
+        # Qwen3-ASR degrades on long audio (>12s) — the rolling preview window
+        # was more accurate than full-audio transcription because it processed
+        # shorter segments. Chunking gives the same benefit.
+        from ..audio import chunk_wav_on_silence
+        import os as _os
+
+        chunk_paths = chunk_wav_on_silence(audio_path, max_chunk_seconds=8.0)
+        is_chunked = len(chunk_paths) > 1
+
+        if is_chunked and self.verbose:
+            import sys
+            sys.stderr.write(f"[qwen3-asr] chunked into {len(chunk_paths)} segments\n")
+
+        all_texts: list[str] = []
+        all_stderr: list[str] = []
+
+        for chunk_idx, chunk_path in enumerate(chunk_paths):
+            if self._cancel_requested:
+                # Clean up remaining chunks
+                for p in chunk_paths[chunk_idx:]:
+                    try:
+                        _os.remove(p)
+                    except OSError:
+                        pass
+                return TranscriptionResult(text="", segments=[], language=language)
+
+            chunk_text = self._transcribe_single(
+                chunk_path, language=language, initial_prompt=initial_prompt,
+                on_progress=on_progress if not is_chunked else None,
+                on_segment=on_segment,
+                chunk_idx=chunk_idx if is_chunked else None,
+            )
+
+            # Clean up chunk temp file (unless it's the original)
+            if chunk_path != audio_path:
+                try:
+                    _os.remove(chunk_path)
+                except OSError:
+                    pass
+
+            if chunk_text:
+                all_texts.append(chunk_text)
+
+            if on_progress and is_chunked:
+                pct = int((chunk_idx + 1) / len(chunk_paths) * 100)
+                on_progress(pct, f"chunk {chunk_idx+1}/{len(chunk_paths)}")
+
+        text = " ".join(t.strip() for t in all_texts if t.strip()).strip()
+        text = self._clean_output(text)
+
+        if self.verbose:
+            import sys
+            sys.stderr.write(f"[qwen3-asr] final: {text!r}\n")
+
+        if on_progress:
+            on_progress(100, "Done")
+
+        segment = Segment(text=text, start_ms=0, end_ms=0, language=language)
+        return TranscriptionResult(
+            text=text,
+            segments=[segment],
+            language=language,
+            raw={"chunked": is_chunked, "num_chunks": len(chunk_paths)},
+        )
+
+    def _transcribe_single(self, audio_path: str, *, language: str = "auto",
+                           initial_prompt: str = "",
+                           on_progress: Optional[ProgressFn] = None,
+                           on_segment: Optional[SegmentFn] = None,
+                           chunk_idx: Optional[int] = None) -> str:
+        """Transcribe a single audio file (one chunk). Returns cleaned text."""
         with self._transcribe_lock:
             cmd = self._build_cmd(audio_path, initial_prompt=initial_prompt)
 
             if self.verbose:
                 import sys
-                sys.stderr.write(f"[qwen3-asr] cmd: {' '.join(cmd)}\n")
+                label = f"chunk {chunk_idx}" if chunk_idx is not None else "audio"
+                sys.stderr.write(f"[qwen3-asr] transcribing {label}\n")
 
-            if on_progress:
+            if on_progress and chunk_idx is None:
                 on_progress(-1, "Transcribing with Qwen3-ASR...")
 
             try:
@@ -170,9 +243,7 @@ class Qwen3AsrBackend(TranscriptionBackend):
                 ) from exc
 
             stdout_lines = []
-            stderr_lines = []
 
-            # Read stdout line by line for streaming
             try:
                 for line in local_proc.stdout:
                     if self._cancel_requested:
@@ -186,10 +257,8 @@ class Qwen3AsrBackend(TranscriptionBackend):
             except Exception:  # noqa: BLE001
                 pass
 
-            # Read stderr
             try:
-                stderr_text = local_proc.stderr.read()
-                stderr_lines = stderr_text.splitlines()
+                local_proc.stderr.read()
             except Exception:  # noqa: BLE001
                 pass
 
@@ -197,36 +266,17 @@ class Qwen3AsrBackend(TranscriptionBackend):
             self._proc = None
 
             if self._cancel_requested:
-                return TranscriptionResult(text="", segments=[], language=language)
+                return ""
 
             rc = local_proc.returncode
             if rc != 0:
-                err_text = "\n".join(stderr_lines[-10:]) if stderr_lines else "(no stderr)"
-                raise TranscriptionError(
-                    f"Qwen3-ASR binary exited with code {rc}: {err_text}"
-                )
+                if self.verbose:
+                    import sys
+                    sys.stderr.write(f"[qwen3-asr] chunk exited with code {rc}\n")
+                return ""
 
-            # Parse output — Qwen3-ASR outputs plain text (may include system tokens)
             raw_text = "\n".join(stdout_lines).strip()
-
-            # Clean up common artifacts from multimodal output
-            text = self._clean_output(raw_text)
-
-            if self.verbose:
-                import sys
-                sys.stderr.write(f"[qwen3-asr] raw output: {raw_text!r}\n")
-                sys.stderr.write(f"[qwen3-asr] cleaned: {text!r}\n")
-
-            if on_progress:
-                on_progress(100, "Done")
-
-            segment = Segment(text=text, start_ms=0, end_ms=0, language=language)
-            return TranscriptionResult(
-                text=text,
-                segments=[segment],
-                language=language,
-                raw={"stdout": raw_text, "stderr": "\n".join(stderr_lines)},
-            )
+            return self._clean_output(raw_text)
 
     @staticmethod
     def _clean_output(text: str) -> str:

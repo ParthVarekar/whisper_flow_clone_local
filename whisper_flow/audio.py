@@ -435,6 +435,147 @@ def _write_wav_chunk(arr, sample_rate: int, channels: int) -> str:
     return out_path
 
 
+def chunk_wav_on_silence(
+    wav_path: str,
+    *,
+    max_chunk_seconds: float = 8.0,
+    silence_threshold_db: float = -35.0,
+    min_silence_ms: int = 300,
+    sample_rate: int = 16000,
+) -> list[str]:
+    """Split a WAV file into chunks at silence boundaries.
+
+    Qwen3-ASR (and most ASR models) degrade on long audio (>12s). The rolling
+    preview window was more accurate than the full-audio transcription because
+    it processed shorter segments. This function splits long recordings into
+    ~8s chunks at silence boundaries, so each chunk is short enough for
+    accurate transcription.
+
+    Args:
+        wav_path: Path to the input WAV file (16kHz mono int16).
+        max_chunk_seconds: Maximum chunk length (default 8s).
+        silence_threshold_db: dB threshold for silence detection (default -35dB).
+        min_silence_ms: Minimum silence duration to split on (default 300ms).
+        sample_rate: Expected sample rate.
+
+    Returns:
+        List of paths to chunk WAV files. Caller must delete them after use.
+        If chunking fails or audio is short, returns [wav_path] (single chunk).
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return [wav_path]
+
+    # Read the WAV file
+    try:
+        with wave.open(wav_path, "rb") as w:
+            nch = w.getnchannels()
+            sampwidth = w.getsampwidth()
+            sr = w.getframerate()
+            nframes = w.getnframes()
+            raw = w.readframes(nframes)
+        if sampwidth != 2:
+            return [wav_path]  # only handle 16-bit
+        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        if nch > 1:
+            samples = samples[::nch]  # mono
+    except Exception:
+        return [wav_path]
+
+    total_dur = len(samples) / sr
+    # If already short enough, no need to chunk
+    if total_dur <= max_chunk_seconds:
+        return [wav_path]
+
+    # Find silence boundaries using RMS energy in 20ms frames
+    frame_len = int(0.02 * sr)
+    n_frames = len(samples) // frame_len
+    if n_frames < 2:
+        return [wav_path]
+
+    frames = samples[:n_frames * frame_len].reshape(n_frames, frame_len)
+    rms = np.sqrt(np.mean(frames ** 2, axis=1))
+
+    peak = float(np.max(rms))
+    if peak == 0:
+        return [wav_path]
+    threshold = peak * (10.0 ** (silence_threshold_db / 20.0))
+
+    # Find silence runs (consecutive frames below threshold)
+    is_silent = rms < threshold
+    silence_starts: list[int] = []  # frame indices
+    silence_runs: list[tuple[int, int]] = []  # (start_frame, end_frame)
+    in_silence = False
+    run_start = 0
+    for i, s in enumerate(is_silent):
+        if s and not in_silence:
+            run_start = i
+            in_silence = True
+        elif not s and in_silence:
+            run_end = i
+            run_dur_ms = (run_end - run_start) * 20
+            if run_dur_ms >= min_silence_ms:
+                silence_runs.append((run_start, run_end))
+            in_silence = False
+
+    # Build split points: split at every silence boundary where the current
+    # chunk is >= 3 seconds. This keeps chunks in the 3-8s range, which is
+    # optimal for Qwen3-ASR accuracy.
+    chunks: list[np.ndarray] = []
+    chunk_start = 0
+    max_chunk_samples = int(max_chunk_seconds * sr)
+    min_chunk_samples = int(3.0 * sr)  # don't create chunks shorter than 3s
+
+    for s_start, s_end in silence_runs:
+        s_start_sample = s_start * frame_len
+        s_end_sample = s_end * frame_len
+        mid = (s_start_sample + s_end_sample) // 2
+        chunk_len = mid - chunk_start
+        # Split if current chunk is >= 3s (avoid tiny chunks)
+        # OR if current chunk would exceed max_chunk_seconds
+        if chunk_len >= min_chunk_samples or chunk_len >= max_chunk_samples:
+            chunks.append(samples[chunk_start:mid])
+            chunk_start = mid
+
+    # Add the final chunk
+    if chunk_start < len(samples):
+        chunks.append(samples[chunk_start:])
+
+    # Force-split any chunk that's still > max_chunk_seconds (no silence found)
+    final_chunks: list[np.ndarray] = []
+    for chunk in chunks:
+        if len(chunk) > max_chunk_samples:
+            for i in range(0, len(chunk), max_chunk_samples):
+                final_chunks.append(chunk[i:i + max_chunk_samples])
+        else:
+            final_chunks.append(chunk)
+    chunks = final_chunks
+
+    # Write each chunk to a temp WAV file
+    chunk_paths: list[str] = []
+    for i, chunk in enumerate(chunks):
+        if len(chunk) < int(0.3 * sr):  # skip chunks < 0.3s
+            continue
+        int16_chunk = (np.clip(chunk, -1.0, 1.0) * 32767.0).astype(np.int16)
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"wf_chunk_{i}_", suffix=".wav", delete=False, dir=tempfile.gettempdir()
+        )
+        path = tmp.name
+        tmp.close()
+        with wave.open(path, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes(int16_chunk.tobytes())
+        chunk_paths.append(path)
+
+    if not chunk_paths:
+        return [wav_path]
+
+    return chunk_paths
+
+
 def list_sounddevice_input_devices() -> list[tuple[str, str]]:
     """Return `(spec, label)` pairs for sounddevice input devices.
 
