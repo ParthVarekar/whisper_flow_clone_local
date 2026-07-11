@@ -58,6 +58,11 @@ class Daemon:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self._overlay = OverlayNotifier(opacity=0.85)
+        # Sync the overlay's initial mode with the config mode.
+        # Without this, the overlay defaults to "auto" which would trigger
+        # LLM cleanup even when the config says mode="raw".
+        self._overlay.set_mode(cfg.mode)
+        self._overlay.set_writing_style(cfg.writing_style)
         self._pipeline = Pipeline(cfg, notifier=self._overlay)
         self._tray: Optional[TrayIcon] = None
         self._hotkeys: Optional[HotkeyManager] = None

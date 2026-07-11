@@ -56,6 +56,12 @@ if %ERRORLEVEL% NEQ 0 (
     python -m pip install sounddevice
 )
 
+python -c "import pynput" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [INSTALL] Installing pynput ^(global hotkeys^)...
+    python -m pip install pynput
+)
+
 python -c "import pystray" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo [INSTALL] Installing pystray + Pillow ^(system tray^)...
@@ -66,6 +72,21 @@ python -c "import numpy" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo [INSTALL] Installing numpy...
     python -m pip install numpy
+)
+
+python -c "import pyperclip" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [INSTALL] Installing pyperclip ^(clipboard fallback^)...
+    python -m pip install pyperclip
+)
+
+python -c "import tomllib" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    python -c "import tomli" >nul 2>&1
+    if %ERRORLEVEL% NEQ 0 (
+        echo [INSTALL] Installing tomli ^(TOML config for Python ^< 3.11^)...
+        python -m pip install tomli
+    )
 )
 
 :: -----------------------------------------------------------------------

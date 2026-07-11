@@ -1,7 +1,7 @@
 # WhisperFlow runtime dependencies.
 #
 # The core whisper_flow package is stdlib-only, but the daemon mode requires
-# these packages for ASR, mic capture, and the system tray UI.
+# these packages for ASR, mic capture, hotkeys, and the system tray UI.
 #
 # Install with:
 #   pip install -r requirements.txt
@@ -15,14 +15,22 @@ moonshine-voice>=0.1.0
 # Microphone capture (cross-platform PortAudio binding)
 sounddevice>=0.4.6
 
+# Global hotkey listener (Ctrl+Shift+Space for push-to-talk)
+# CRITICAL: without this, the daemon cannot listen for hotkeys and dictation
+# will not work at all.
+pynput>=1.7.6
+
 # System tray icon (daemon UI)
 pystray>=0.19.5
 
 # Image support for the tray icon (required by pystray)
 Pillow>=10.0.0
 
-# Numerical arrays (required by moonshine-voice + sounddevice)
+# Numerical arrays (required by moonshine-voice + sounddevice + audio processing)
 numpy>=1.24.0
 
-# Optional: TOML config on Python 3.8-3.10 (3.11+ has stdlib tomllib)
-# tomli; python_version < "3.11"
+# Clipboard fallback for text insertion (used if ctypes SendInput fails on Windows)
+pyperclip>=1.8.2
+
+# TOML config parsing on Python 3.8-3.10 (3.11+ has stdlib tomllib)
+tomli; python_version < "3.11"
