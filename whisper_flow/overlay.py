@@ -113,32 +113,40 @@ class OverlayNotifier:
     def show_result(self, text: str) -> None:
         """Show final polished output with a typewriter reveal effect.
 
+        SYNCHRONOUS — blocks until the typewriter reveal is complete, then
+        sends the final RESULT (which triggers dynamic auto-hide). This
+        prevents the daemon's finally block from hiding the popup before
+        the typewriter animation finishes.
+
         The text appears progressively (word-by-word) so the user sees
         the polished output appear, making the polishing step feel responsive.
-        Uses PREVIEW during typing (doesn't trigger auto-hide), then sends
-        RESULT once at the end (triggers dynamic auto-hide based on length).
         """
         if not text:
             return
         display = text if len(text) <= 500 else text[:495] + "..."
 
-        def _reveal_progressive():
-            import time
-            words = display.split(" ")
-            chunk_size = 3  # 3 words per chunk for natural typing speed
-            for i in range(0, len(words), chunk_size):
-                partial = " ".join(words[:i + chunk_size])
-                if i + chunk_size < len(words):
-                    partial += " ▌"  # cursor block
-                # Use PREVIEW during typing (doesn't trigger auto-hide)
-                self._q.put((_MSG_PREVIEW, partial))
-                time.sleep(0.04)  # 40ms between chunks
+        # Synchronous typewriter reveal — blocks the calling thread
+        import time as _time
+        words = display.split(" ")
+        chunk_size = 3  # 3 words per chunk for natural typing speed
+        for i in range(0, len(words), chunk_size):
+            partial = " ".join(words[:i + chunk_size])
+            if i + chunk_size < len(words):
+                partial += " ▌"  # cursor block
+            # Use PREVIEW during typing (doesn't trigger auto-hide)
+            self._q.put((_MSG_PREVIEW, partial))
+            _time.sleep(0.04)  # 40ms between chunks
 
-            # Send the final RESULT (switches to "done" state with green dot
-            # and triggers dynamic auto-hide based on text length)
-            self._q.put((_MSG_RESULT, display))
+        # Send the final RESULT (switches to "done" state with green dot
+        # and triggers dynamic auto-hide based on text length)
+        self._q.put((_MSG_RESULT, display))
 
-        threading.Thread(target=_reveal_progressive, daemon=True).start()
+        # Wait for the dynamic auto-hide duration before returning, so the
+        # daemon's finally block (which calls hide()) doesn't kill the popup
+        # before the user has time to read the result.
+        word_count = len(display.split())
+        stay_ms = min(30000, int(5000 + word_count * 80))
+        _time.sleep(stay_ms / 1000.0)
 
     def set_mode(self, mode: str) -> None:
         self._selected_mode = mode

@@ -237,19 +237,23 @@ class Daemon:
     def _live_preview_loop(self) -> None:
         """Periodically transcribe a rolling window and show partial text in overlay.
 
-        Uses a 4-second poll interval so Qwen3-ASR (which takes ~2-5s per
-        transcription) doesn't queue up multiple calls. This gives the user
-        live text feedback during recording without blocking the GPU.
+        Uses a 2-second poll interval so text appears quickly during recording.
+        A guard flag prevents overlapping transcriptions (if the previous
+        preview is still running when the next poll fires, it skips).
         """
-        poll_s = 4.0  # 4s between preview transcriptions (avoids GPU queue)
+        poll_s = 2.0  # 2s between preview transcriptions
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
+        self._preview_busy = False  # guard against overlapping transcriptions
 
         while True:
             time.sleep(poll_s)
             with self._lock:
                 if not self._recording:
                     break
+            # Skip if the previous preview transcription is still running
+            if self._preview_busy:
+                continue
             capture = self._capture
             if capture is None:
                 break
@@ -263,6 +267,7 @@ class Daemon:
                         if wav_path and os.path.exists(wav_path):
                             os.remove(wav_path)
                         break
+                self._preview_busy = True
                 try:
                     res = self._pipeline.stt.transcribe(
                         wav_path,
@@ -270,14 +275,16 @@ class Daemon:
                         initial_prompt=initial_p,
                     )
                 finally:
+                    self._preview_busy = False
                     if wav_path and os.path.exists(wav_path):
                         os.remove(wav_path)
                 preview_text = res.text.strip()
-                # Filter out common streaming/chunk hallucinations from whisper models
+                # Filter out common streaming/chunk hallucinations
                 hallucinations = {"[BLANK_AUDIO]", "Thank you for watching", "Thanks for watching.", "Subscribe to my channel", "..."}
                 if preview_text and preview_text not in hallucinations and not preview_text.startswith("Thank you for watching"):
                     self._overlay.on_stream_preview(preview_text)
             except Exception:  # noqa: BLE001
+                self._preview_busy = False
                 pass  # Don't crash the preview loop on transient errors
 
     def _on_dictation_stop(self) -> None:
