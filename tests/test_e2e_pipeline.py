@@ -37,6 +37,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -247,10 +248,11 @@ def llm_polish(text: str, system_prompt: str, use_local: bool) -> tuple[str, flo
 
 
 # ---------------------------------------------------------------------------
-# TTS (always cloud — just for generating test audio)
+# TTS — tries z-ai cloud first, falls back to Windows native SAPI TTS
 # ---------------------------------------------------------------------------
 
-def generate_tts(text: str, output_path: str) -> bool:
+def _tts_zai(text: str, output_path: str) -> bool:
+    """Generate audio using z-ai cloud TTS (available in z-ai workspace)."""
     try:
         result = subprocess.run(
             ["z-ai", "tts", "-i", text[:1000], "-o", output_path],
@@ -259,6 +261,79 @@ def generate_tts(text: str, output_path: str) -> bool:
         return result.returncode == 0 and os.path.exists(output_path)
     except Exception:
         return False
+
+
+def _tts_windows_sapi(text: str, output_path: str) -> bool:
+    """Generate audio using Windows native SAPI TTS (no dependencies needed).
+
+    Uses PowerShell to invoke the SAPI.SpVoice COM object, which is built into
+    Windows. This works on the user's device without needing z-ai CLI.
+    The output is a WAV file at the specified path.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        # PowerShell script to generate WAV using SAPI
+        # SAPI outputs to a temp file, then we move it
+        ps_script = f'''
+Add-Type -AssemblyName System.Speech
+$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$synth.Rate = 0
+$synth.Volume = 100
+# Use a decent voice if available
+$voices = $synth.GetInstalledVoices()
+if ($voices.Count -gt 0) {{
+    $synth.SelectVoice($voices[0].VoiceInfo.Name)
+}}
+$synth.SetOutputToWaveFile("{output_path}")
+$synth.Speak("{text[:1000].replace('"', '`"')}")
+$synth.Dispose()
+'''
+        result = subprocess.run(
+            ["powershell", "-Command", ps_script],
+            capture_output=True, text=True, timeout=30
+        )
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception:
+        return False
+
+
+def _tts_pyttsx3(text: str, output_path: str) -> bool:
+    """Generate audio using pyttsx3 (cross-platform, needs pip install)."""
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        engine.save_to_file(text[:1000], output_path)
+        engine.runAndWait()
+        engine.stop()
+        return os.path.exists(output_path)
+    except Exception:
+        return False
+
+
+def generate_tts(text: str, output_path: str) -> bool:
+    """Generate audio using the best available TTS method.
+
+    Tries in order:
+      1. z-ai cloud TTS (best quality, available in z-ai workspace)
+      2. Windows SAPI TTS (built into Windows, no dependencies)
+      3. pyttsx3 (cross-platform, needs pip install)
+
+    Returns True if audio was generated successfully.
+    """
+    # Try z-ai cloud first
+    if _tts_zai(text, output_path):
+        return True
+
+    # Fall back to Windows SAPI (no dependencies needed on Windows)
+    if _tts_windows_sapi(text, output_path):
+        return True
+
+    # Fall back to pyttsx3 (if installed)
+    if _tts_pyttsx3(text, output_path):
+        return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +378,15 @@ def run_tests(verbose: bool = False, skip_tts: bool = False):
     print("=" * 95)
     print(f"ASR backend:  {asr_backend} ({'✅ detected' if local_asr else '❌ not found → fallback'})")
     print(f"LLM backend:  {llm_backend} ({'✅ detected' if local_llm else '❌ not running → fallback'})")
-    print(f"TTS backend:  z-ai cloud TTS (test audio generation only)")
+    # Detect TTS backend
+    if shutil.which("z-ai"):
+        tts_backend = "z-ai cloud TTS"
+    elif sys.platform == "win32":
+        tts_backend = "Windows SAPI TTS"
+    else:
+        tts_backend = "pyttsx3 (if installed)"
+
+    print(f"TTS backend:  {tts_backend} (test audio generation only)")
     print()
 
     system_prompt = SYSTEM_PROMPTS["medium"]
