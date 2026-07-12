@@ -350,8 +350,21 @@ class Daemon:
 
                     self._preview_accumulated = self._chunk_transcribed
 
-                # Show the accumulated transcript in the popup
-                self._overlay.on_stream_preview(self._chunk_transcribed)
+                # Wispr Flow practice: show REFINED text, not raw ASR.
+                # Apply lightweight rule-based cleanup (filler removal, capitalization,
+                # backtrack correction) to the accumulated text before showing it.
+                # This gives the user a preview of cleaned text while still speaking,
+                # instead of raw messy ASR output.
+                try:
+                    from .formatting import apply_smart_formatting
+                    display_text = apply_smart_formatting(
+                        self._chunk_transcribed,
+                        writing_style="default",
+                    )
+                except Exception:  # noqa: BLE001
+                    display_text = self._chunk_transcribed
+
+                self._overlay.on_stream_preview(display_text)
             except Exception:  # noqa: BLE001
                 pass
             finally:
