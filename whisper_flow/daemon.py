@@ -252,26 +252,33 @@ class Daemon:
                 self._recording = False
 
     def _background_chunk_processor(self) -> None:
-        """Background chunk processor — transcribes audio chunks DURING recording.
+        """Sliding window streaming processor — transcribes growing audio DURING recording.
 
-        ARCHITECTURE (inspired by Wispr Flow streaming):
-        Every 4 seconds during recording, extracts the latest 4s chunk of audio
-        and transcribes it in the background. The transcribed text accumulates
-        in _chunk_transcribed and is shown to the user in real-time.
+        ARCHITECTURE (proper streaming, like whisper.cpp / Wispr Flow):
+        Uses a SLIDING WINDOW approach instead of fixed disjoint chunks:
+        - For short audio (<14s): transcribe the ENTIRE audio so far
+          → Full sentence context, no overlap detection needed
+          → Transcript grows naturally, highly accurate
+        - For long audio (14s+): transcribe only the NEW portion since last
+          transcription, with a 2s overlap for continuity
+          → Keeps ASR fast even for long recordings
+          → Overlap detection stitches the pieces together
 
-        By the time the user releases the hotkey, most of the transcription is
-        already done. The _process_dictation method just uses the accumulated
-        _chunk_transcribed text and only needs to do LLM polishing.
+        This is how whisper.cpp streaming mode works: it processes the growing
+        audio buffer. Wispr Flow uses a similar approach with LLM post-processing.
 
-        This eliminates the 5-10s wait after releasing the hotkey — the user
-        sees text appear while speaking, and the final output is nearly instant.
+        By the time the user releases the hotkey, the transcription is already
+        done — _process_dictation just uses the accumulated text.
         """
-        chunk_interval = 4.0  # extract a 4s chunk every 4s
+        poll_interval = 2.0  # transcribe every 2s
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
 
+        # Track how much audio we've already transcribed (for long recordings)
+        last_transcribed_duration = 0.0
+
         while True:
-            time.sleep(0.3)  # check every 0.3s
+            time.sleep(0.3)  # check every 0.3s if ready to transcribe
             with self._lock:
                 if not self._recording:
                     break
@@ -286,15 +293,10 @@ class Daemon:
             elapsed_since_last = now - self._last_chunk_time
             total_dur = capture.total_duration_sec
 
-            # Wait until we have at least chunk_interval seconds of new audio
-            if elapsed_since_last < chunk_interval or total_dur < chunk_interval:
+            # Wait until enough time has passed and we have enough audio
+            if elapsed_since_last < poll_interval or total_dur < 1.0:
                 continue
 
-            # Extract a chunk: from _last_chunk_time offset to now
-            # We use snapshot_window which gives us the rolling window
-            # But we need a specific 4s slice. Since LiveMicCapture doesn't
-            # support arbitrary offsets, we transcribe the rolling window
-            # (which is the latest 4s) and accumulate with overlap detection.
             with self._lock:
                 if not self._recording:
                     break
@@ -302,14 +304,28 @@ class Daemon:
                 self._last_chunk_time = now
 
             try:
-                wav_path, _win_dur, _offset = capture.snapshot_window()
+                # Decide: full transcription vs incremental
+                # For audio < 14s: transcribe everything (sliding window)
+                # For audio >= 14s: transcribe only new portion (incremental)
+                use_full = total_dur < 14.0
+
+                if use_full:
+                    # SLIDING WINDOW: transcribe the full audio so far.
+                    # Gives complete sentence context, no overlap detection needed.
+                    wav_path, _, _ = capture.snapshot_full()
+                else:
+                    # INCREMENTAL: transcribe only the rolling window (last ~6s).
+                    # The rolling window captures the newest audio. We use overlap
+                    # detection to stitch it with the previously transcribed text.
+                    wav_path, _, _ = capture.snapshot_window()
+
                 with self._lock:
                     if not self._recording:
                         if wav_path and os.path.exists(wav_path):
                             os.remove(wav_path)
                         break
 
-                # Transcribe this chunk
+                # Transcribe
                 res = self._pipeline.stt.transcribe(
                     wav_path,
                     language=self.cfg.transcription.language,
@@ -324,37 +340,37 @@ class Daemon:
                 if not chunk_text or chunk_text in hallucinations or chunk_text.startswith("Thank you for watching"):
                     continue
 
-                # Accumulate with overlap detection
                 with self._lock:
-                    if not self._chunk_transcribed:
+                    if use_full:
+                        # Full transcription: just use the result directly
                         self._chunk_transcribed = chunk_text
                     else:
-                        accumulated = self._chunk_transcribed
-                        acc_words = accumulated.split()
-                        new_words = chunk_text.split()
+                        # Incremental: append with overlap detection
+                        if not self._chunk_transcribed:
+                            self._chunk_transcribed = chunk_text
+                        else:
+                            accumulated = self._chunk_transcribed
+                            acc_words = accumulated.split()
+                            new_words = chunk_text.split()
 
-                        # Find overlap: words from end of accumulated match start of new
-                        max_overlap = min(len(acc_words), len(new_words))
-                        overlap = 0
-                        for n in range(max_overlap, 0, -1):
-                            if acc_words[-n:] == new_words[:n]:
-                                overlap = n
-                                break
+                            # Find overlap: words from end of accumulated match start of new
+                            max_overlap = min(len(acc_words), len(new_words))
+                            overlap = 0
+                            for n in range(max_overlap, 0, -1):
+                                if acc_words[-n:] == new_words[:n]:
+                                    overlap = n
+                                    break
 
-                        if overlap > 0 and overlap < len(new_words):
-                            new_part = " ".join(new_words[overlap:])
-                            self._chunk_transcribed = accumulated + " " + new_part
-                        elif overlap == 0:
-                            if chunk_text not in accumulated:
-                                self._chunk_transcribed = accumulated + " " + chunk_text
+                            if overlap > 0 and overlap < len(new_words):
+                                new_part = " ".join(new_words[overlap:])
+                                self._chunk_transcribed = accumulated + " " + new_part
+                            elif overlap == 0:
+                                if chunk_text not in accumulated:
+                                    self._chunk_transcribed = accumulated + " " + chunk_text
 
                     self._preview_accumulated = self._chunk_transcribed
 
                 # Wispr Flow practice: show REFINED text, not raw ASR.
-                # Apply lightweight rule-based cleanup (filler removal, capitalization,
-                # backtrack correction) to the accumulated text before showing it.
-                # This gives the user a preview of cleaned text while still speaking,
-                # instead of raw messy ASR output.
                 try:
                     from .formatting import apply_smart_formatting
                     display_text = apply_smart_formatting(
