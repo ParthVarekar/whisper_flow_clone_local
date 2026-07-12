@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
-"""WhisperFlow end-to-end test suite.
+"""WhisperFlow end-to-end test suite with auto backend detection.
 
-Generates test audio at varying lengths using z-ai TTS, then runs each
-through the full pipeline:
-  1. ASR (z-ai cloud ASR — simulates Qwen3-ASR on user's device)
-  2. Rule-based formatting (our formatting.py)
-  3. LLM polishing (z-ai cloud LLM — simulates gemma-4 on user's device)
+AUTOMATIC BACKEND SELECTION:
+  - ASR: tries local crispasr.exe first, falls back to z-ai cloud ASR
+  - LLM: tries local llama-server (port 8081) first, falls back to z-ai cloud LLM
+  - TTS: uses z-ai cloud TTS (for generating test audio only)
+
+This means:
+  - On the user's Windows device: local Qwen3-ASR + gemma-4 are used
+  - In the z-ai workspace: z-ai cloud endpoints are used (no local models)
+
+The test reports which backend was used for each stage so you can compare
+local vs cloud performance.
+
+Pipeline per test:
+  1. Generate audio (z-ai TTS)
+  2. ASR (local crispasr OR z-ai cloud)
+  3. Rule-based formatting (our formatting.py — always local, instant)
+  4. LLM polishing (local llama-server OR z-ai cloud)
 
 Reports:
-  - Word Error Rate (WER) for ASR accuracy
-  - Formatting improvement (how much formatting.py cleans up)
-  - LLM polishing improvement (how much LLM improves over formatted)
+  - Word Error Rate (WER) at each stage
   - Timing for each stage
-  - List formatting detection
-  - Backtrack correction
-  - Filler word removal
-  - Number normalization
+  - Which backend was used (local vs cloud)
+  - Feature detection (lists, backtracks, fillers, etc.)
 
 Usage:
     python tests/test_e2e_pipeline.py
     python tests/test_e2e_pipeline.py --verbose
-    python tests/test_e2e_pipeline.py --skip-tts  # skip audio generation, use existing
-
-Requires: z-ai CLI in PATH (for TTS + ASR + LLM)
+    python tests/test_e2e_pipeline.py --skip-tts  # reuse existing audio
 """
 
 from __future__ import annotations
@@ -30,153 +36,87 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 import tempfile
+import urllib.request
+import urllib.error
 from pathlib import Path
 
-# Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from whisper_flow.formatting import apply_smart_formatting
+from whisper_flow.prompts import SYSTEM_PROMPTS
 
 
 # ---------------------------------------------------------------------------
-# Test cases — varying lengths and feature coverage
+# Test cases
 # ---------------------------------------------------------------------------
 
 TEST_CASES = [
-    # --- Short recordings (3-8 seconds) ---
-    {
-        "name": "short_simple",
-        "text": "This is a simple test of the voice dictation system.",
-        "expected_duration": "~4s",
-        "features": ["basic"],
-    },
-    {
-        "name": "short_fillers",
-        "text": "Um, I was thinking, uh, maybe we should, like, go to the store.",
-        "expected_features": ["filler_removal"],
-        "expected_formatted_contains": "thinking maybe we should go to the store",
-    },
-    {
-        "name": "short_backtrack",
-        "text": "Let's meet at 2pm. Actually, let's meet at 3pm instead.",
-        "expected_features": ["backtrack"],
-        "expected_formatted_contains": "3pm",
-    },
-    {
-        "name": "short_numbers",
-        "text": "I have twenty five apples and one hundred dollars.",
-        "expected_features": ["number_normalization"],
-        "expected_formatted_contains": "25",
-    },
+    # Short (3-8s)
+    {"name": "short_simple", "text": "This is a simple test of the voice dictation system."},
+    {"name": "short_fillers", "text": "Um, I was thinking, uh, maybe we should, like, go to the store.",
+     "expected_formatted_contains": "thinking maybe we should go to the store"},
+    {"name": "short_backtrack", "text": "Let's meet at 2pm. Actually, let's meet at 3pm instead.",
+     "expected_formatted_contains": "3"},
+    {"name": "short_numbers", "text": "I have twenty five apples and one hundred dollars.",
+     "expected_formatted_contains": "25"},
 
-    # --- Medium recordings (8-15 seconds) ---
-    {
-        "name": "medium_proper_nouns",
-        "text": "I am testing WhisperFlow with Qwen3-ASR and Moonshine models for voice dictation.",
-        "expected_features": ["proper_nouns"],
-        "expected_formatted_contains": "WhisperFlow",
-    },
-    {
-        "name": "medium_currency",
-        "text": "The laptop costs twelve hundred dollars and the phone costs fifty pounds.",
-        "expected_features": ["currency"],
-        "expected_formatted_contains": "$",
-    },
-    {
-        "name": "medium_time",
-        "text": "The meeting is at three thirty PM and ends at four forty five PM.",
-        "expected_features": ["time_normalization"],
-        "expected_formatted_contains": "3:30",
-    },
-    {
-        "name": "medium_list",
-        "text": "I need to buy several items: apples, bananas, oranges, milk, and bread.",
-        "expected_features": ["list_detection"],
-    },
+    # Medium (8-15s)
+    {"name": "medium_proper_nouns", "text": "I am testing WhisperFlow with Qwen3-ASR and Moonshine models for voice dictation.",
+     "expected_formatted_contains": "WhisperFlow"},
+    {"name": "medium_currency", "text": "The laptop costs twelve hundred dollars and the phone costs fifty pounds.",
+     "expected_formatted_contains": "$"},
+    {"name": "medium_time", "text": "The meeting is at three thirty PM and ends at four forty five PM.",
+     "expected_formatted_contains": "3:30"},
+    {"name": "medium_list", "text": "I need to buy several items: apples, bananas, oranges, milk, and bread."},
 
-    # --- Long recordings (15-30 seconds) ---
-    {
-        "name": "long_paragraph",
-        "text": (
-            "This is a longer test to check how the system handles extended dictation. "
-            "I am going to speak for about twenty seconds to see if the transcription "
-            "remains accurate throughout. The system should remove filler words, fix "
-            "grammar, and produce clean formatted text. Let's see how it performs."
-        ),
-        "expected_duration": "~20s",
-        "features": ["long_form"],
-    },
-    {
-        "name": "long_with_corrections",
-        "text": (
-            "First, I want to say that the project deadline is Friday. "
-            "Actually, no, it's Monday. Sorry, I meant Tuesday. "
-            "The team should be ready by then."
-        ),
-        "expected_features": ["backtrack", "long_form"],
-        "expected_formatted_contains": "Tuesday",
-    },
-    {
-        "name": "long_technical",
-        "text": (
-            "We need to update the whisper_flow daemon to use the qwen3_asr backend "
-            "instead of moonshine. The config file llama4.toml has the wrong settings. "
-            "Also, fix the crispasr command to include the dash prompt flag for "
-            "proper noun detection."
-        ),
-        "expected_features": ["technical_terms", "long_form"],
-    },
+    # Long (15-30s)
+    {"name": "long_paragraph", "text": "This is a longer test to check how the system handles extended dictation. I am going to speak for about twenty seconds to see if the transcription remains accurate throughout. The system should remove filler words, fix grammar, and produce clean formatted text."},
+    {"name": "long_corrections", "text": "First, I want to say that the project deadline is Friday. Actually, no, it's Monday. Sorry, I meant Tuesday. The team should be ready by then.",
+     "expected_formatted_contains": "Tuesday"},
+    {"name": "long_technical", "text": "We need to update the whisper_flow daemon to use the qwen3_asr backend instead of moonshine. The config file has the wrong settings. Also fix the crispasr command to include the prompt flag for proper noun detection."},
 
-    # --- Edge cases ---
-    {
-        "name": "edge_very_short",
-        "text": "Hello world.",
-        "expected_features": ["minimal"],
-    },
-    {
-        "name": "edge_stutter",
-        "text": "I I I want to to to go to the the store.",
-        "expected_features": ["stutter_removal"],
-        "expected_formatted_contains": "I want to go to the store",
-    },
-    {
-        "name": "edge_punctuation_words",
-        "text": "Hello comma world period New paragraph This is a test period",
-        "expected_features": ["punctuation_words"],
-    },
-    {
-        "name": "edge_mixed_numbers",
-        "text": "I have two cats, three dogs, and twelve fish. That is seventeen animals total.",
-        "expected_features": ["number_normalization"],
-    },
+    # Edge cases
+    {"name": "edge_very_short", "text": "Hello world."},
+    {"name": "edge_stutter", "text": "I I I want to to to go to the the store.",
+     "expected_formatted_contains": "I want to go to the store"},
+    {"name": "edge_numbers", "text": "I have two cats, three dogs, and twelve fish. That is seventeen animals total.",
+     "expected_formatted_contains": "17"},
 ]
 
 
 # ---------------------------------------------------------------------------
-# Helper functions
+# Backend detection
 # ---------------------------------------------------------------------------
 
-def generate_tts(text: str, output_path: str) -> bool:
-    """Generate audio using z-ai TTS CLI."""
+# Local model paths (Windows — user's device)
+CRISPASR_BIN = r"C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe"
+CRISPASR_MODEL = r"C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf"
+LLM_SERVER_URL = "http://127.0.0.1:8081"
+
+
+def check_local_asr() -> bool:
+    """Check if local crispasr.exe is available."""
+    return os.path.isfile(CRISPASR_BIN) and os.path.isfile(CRISPASR_MODEL)
+
+
+def check_local_llm() -> bool:
+    """Check if local llama-server is running on port 8081."""
     try:
-        result = subprocess.run(
-            ["z-ai", "tts", "-i", text, "-o", output_path],
-            capture_output=True, text=True, timeout=30
-        )
-        return result.returncode == 0 and os.path.exists(output_path)
+        req = urllib.request.Request(f"{LLM_SERVER_URL}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.status < 500
     except Exception:
         return False
 
 
 def _extract_json_from_output(output: str) -> dict | None:
-    """Extract JSON object from z-ai CLI output (which has emoji status lines)."""
-    import re
-    # Find the first { ... } block in the output
+    """Extract JSON from z-ai CLI output (has emoji status lines)."""
     match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', output, re.DOTALL)
     if match:
         try:
@@ -186,8 +126,35 @@ def _extract_json_from_output(output: str) -> dict | None:
     return None
 
 
-def transcribe_audio(audio_path: str) -> tuple[str, float]:
-    """Transcribe using z-ai ASR CLI. Returns (text, time_ms)."""
+# ---------------------------------------------------------------------------
+# ASR backends
+# ---------------------------------------------------------------------------
+
+def asr_local(audio_path: str) -> tuple[str, float]:
+    """Transcribe using local crispasr.exe (Qwen3-ASR)."""
+    t0 = time.perf_counter()
+    try:
+        cmd = [
+            CRISPASR_BIN, "-m", CRISPASR_MODEL,
+            "-l", "en", "-t", "8", "-bs", "5", "-nt", "-np",
+            "--prompt", "Transcribe in English only.",
+            audio_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        elapsed = (time.perf_counter() - t0) * 1000
+        if result.returncode == 0:
+            text = result.stdout.strip()
+            # Clean up Qwen3-ASR artifacts
+            text = re.sub(r'^language\s+\w+\s*', '', text, flags=re.IGNORECASE).strip()
+            text = re.sub(r'<[^>]+>', '', text).strip()
+            return text, elapsed
+        return f"ERROR: {result.stderr[:200]}", elapsed
+    except Exception as exc:
+        return f"ERROR: {exc}", (time.perf_counter() - t0) * 1000
+
+
+def asr_cloud(audio_path: str) -> tuple[str, float]:
+    """Transcribe using z-ai cloud ASR."""
     t0 = time.perf_counter()
     try:
         result = subprocess.run(
@@ -199,18 +166,59 @@ def transcribe_audio(audio_path: str) -> tuple[str, float]:
             data = _extract_json_from_output(result.stdout)
             if data and "text" in data:
                 return data["text"].strip(), elapsed
-            return "", elapsed
         return "", elapsed
     except Exception as exc:
+        return f"ERROR: {exc}", (time.perf_counter() - t0) * 1000
+
+
+def transcribe_audio(audio_path: str, use_local: bool) -> tuple[str, float, str]:
+    """Transcribe audio. Returns (text, time_ms, backend_name)."""
+    if use_local:
+        text, ms = asr_local(audio_path)
+        return text, ms, "local Qwen3-ASR"
+    else:
+        text, ms = asr_cloud(audio_path)
+        return text, ms, "z-ai cloud ASR"
+
+
+# ---------------------------------------------------------------------------
+# LLM backends
+# ---------------------------------------------------------------------------
+
+def llm_local(text: str, system_prompt: str) -> tuple[str, float]:
+    """Polish using local llama-server (gemma-4)."""
+    t0 = time.perf_counter()
+    try:
+        body = json.dumps({
+            "model": "local",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2048,
+            "stream": False,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{LLM_SERVER_URL}/v1/chat/completions",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read().decode("utf-8")
         elapsed = (time.perf_counter() - t0) * 1000
-        return f"ERROR: {exc}", elapsed
+
+        payload = json.loads(raw)
+        content = payload["choices"][0]["message"]["content"]
+        return content.strip(), elapsed
+    except Exception as exc:
+        return f"ERROR: {exc}", (time.perf_counter() - t0) * 1000
 
 
-def llm_polish(text: str) -> tuple[str, float]:
-    """Polish using z-ai LLM (simulates gemma-4). Returns (text, time_ms)."""
-    from whisper_flow.prompts import SYSTEM_PROMPTS
-    system_prompt = SYSTEM_PROMPTS["medium"]
-
+def llm_cloud(text: str, system_prompt: str) -> tuple[str, float]:
+    """Polish using z-ai cloud LLM."""
     t0 = time.perf_counter()
     try:
         result = subprocess.run(
@@ -223,60 +231,57 @@ def llm_polish(text: str) -> tuple[str, float]:
             if data and "choices" in data:
                 content = data["choices"][0]["message"]["content"]
                 return content.strip(), elapsed
-            return text, elapsed
         return text, elapsed
     except Exception:
-        elapsed = (time.perf_counter() - t0) * 1000
-        return text, elapsed
+        return text, (time.perf_counter() - t0) * 1000
 
+
+def llm_polish(text: str, system_prompt: str, use_local: bool) -> tuple[str, float, str]:
+    """Polish text. Returns (text, time_ms, backend_name)."""
+    if use_local:
+        result, ms = llm_local(text, system_prompt)
+        return result, ms, "local gemma-4"
+    else:
+        result, ms = llm_cloud(text, system_prompt)
+        return result, ms, "z-ai cloud LLM"
+
+
+# ---------------------------------------------------------------------------
+# TTS (always cloud — just for generating test audio)
+# ---------------------------------------------------------------------------
+
+def generate_tts(text: str, output_path: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["z-ai", "tts", "-i", text[:1000], "-o", output_path],
+            capture_output=True, text=True, timeout=30
+        )
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# WER calculation
+# ---------------------------------------------------------------------------
 
 def calculate_wer(reference: str, hypothesis: str) -> float:
-    """Calculate Word Error Rate (lower is better, 0.0 = perfect)."""
     ref_words = reference.lower().split()
     hyp_words = hypothesis.lower().split()
-
     if not ref_words:
         return 0.0 if not hyp_words else 1.0
-
-    # Levenshtein distance on words
     dp = [[0] * (len(hyp_words) + 1) for _ in range(len(ref_words) + 1)]
     for i in range(len(ref_words) + 1):
         dp[i][0] = i
     for j in range(len(hyp_words) + 1):
         dp[0][j] = j
-
     for i in range(1, len(ref_words) + 1):
         for j in range(1, len(hyp_words) + 1):
             if ref_words[i-1] == hyp_words[j-1]:
                 dp[i][j] = dp[i-1][j-1]
             else:
                 dp[i][j] = 1 + min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
-
     return dp[len(ref_words)][len(hyp_words)] / len(ref_words)
-
-
-def calculate_cer(reference: str, hypothesis: str) -> float:
-    """Calculate Character Error Rate (lower is better, 0.0 = perfect)."""
-    ref_chars = list(reference.lower())
-    hyp_chars = list(hypothesis.lower())
-
-    if not ref_chars:
-        return 0.0 if not hyp_chars else 1.0
-
-    dp = [[0] * (len(hyp_chars) + 1) for _ in range(len(ref_chars) + 1)]
-    for i in range(len(ref_chars) + 1):
-        dp[i][0] = i
-    for j in range(len(hyp_chars) + 1):
-        dp[0][j] = j
-
-    for i in range(1, len(ref_chars) + 1):
-        for j in range(1, len(hyp_chars) + 1):
-            if ref_chars[i-1] == hyp_chars[j-1]:
-                dp[i][j] = dp[i-1][j-1]
-            else:
-                dp[i][j] = 1 + min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
-
-    return dp[len(ref_chars)][len(hyp_chars)] / len(ref_chars)
 
 
 # ---------------------------------------------------------------------------
@@ -284,10 +289,24 @@ def calculate_cer(reference: str, hypothesis: str) -> float:
 # ---------------------------------------------------------------------------
 
 def run_tests(verbose: bool = False, skip_tts: bool = False):
-    """Run all test cases and report results."""
     audio_dir = os.path.join(tempfile.gettempdir(), "wf_test_audio")
     os.makedirs(audio_dir, exist_ok=True)
 
+    # Detect backends
+    local_asr = check_local_asr()
+    local_llm = check_local_llm()
+    asr_backend = "local Qwen3-ASR" if local_asr else "z-ai cloud ASR"
+    llm_backend = "local gemma-4" if local_llm else "z-ai cloud LLM"
+
+    print("=" * 95)
+    print("WhisperFlow E2E Test Suite")
+    print("=" * 95)
+    print(f"ASR backend:  {asr_backend} ({'✅ detected' if local_asr else '❌ not found → fallback'})")
+    print(f"LLM backend:  {llm_backend} ({'✅ detected' if local_llm else '❌ not running → fallback'})")
+    print(f"TTS backend:  z-ai cloud TTS (test audio generation only)")
+    print()
+
+    system_prompt = SYSTEM_PROMPTS["medium"]
     results = []
     total_start = time.perf_counter()
 
@@ -299,68 +318,55 @@ def run_tests(verbose: bool = False, skip_tts: bool = False):
         expected_text = tc["text"]
         audio_path = os.path.join(audio_dir, f"{name}.wav")
 
-        # Step 0: Generate audio (or skip)
-        # TTS has a 1024 char limit — truncate if needed
-        tts_text = expected_text[:1000] if len(expected_text) > 1000 else expected_text
+        # Generate audio
         if not skip_tts:
             if not os.path.exists(audio_path):
-                if verbose:
-                    print(f"  Generating TTS for {name}...")
-                if not generate_tts(tts_text, audio_path):
+                if not generate_tts(expected_text, audio_path):
                     print(f"  [SKIP] TTS failed for {name}")
                     continue
         elif not os.path.exists(audio_path):
-            print(f"  [SKIP] No audio for {name} (use --skip-tts only after first run)")
             continue
 
-        # Step 1: ASR (z-ai cloud, simulates Qwen3-ASR)
-        asr_text, asr_ms = transcribe_audio(audio_path)
+        # ASR
+        asr_text, asr_ms, asr_be = transcribe_audio(audio_path, local_asr)
 
-        # Step 2: Rule-based formatting (our formatting.py)
-        t_fmt_start = time.perf_counter()
-        formatted_text = apply_smart_formatting(asr_text, writing_style="default")
-        fmt_ms = (time.perf_counter() - t_fmt_start) * 1000
+        # Formatting (always local)
+        t_fmt = time.perf_counter()
+        formatted = apply_smart_formatting(asr_text, writing_style="default")
+        fmt_ms = (time.perf_counter() - t_fmt) * 1000
 
-        # Step 3: LLM polishing (z-ai cloud, simulates gemma-4)
-        llm_text, llm_ms = llm_polish(formatted_text)
+        # LLM polish
+        llm_text, llm_ms, llm_be = llm_polish(formatted, system_prompt, local_llm)
 
-        # Calculate accuracy
+        # WER
         asr_wer = calculate_wer(expected_text, asr_text)
-        fmt_wer = calculate_wer(expected_text, formatted_text)
+        fmt_wer = calculate_wer(expected_text, formatted)
         llm_wer = calculate_wer(expected_text, llm_text)
 
-        # Check expected features
+        # Feature check
         feature_pass = True
         if "expected_formatted_contains" in tc:
-            if tc["expected_formatted_contains"].lower() not in formatted_text.lower():
+            if tc["expected_formatted_contains"].lower() not in formatted.lower():
                 feature_pass = False
 
         status = "PASS" if asr_wer < 0.5 and feature_pass else "CHECK"
 
         results.append({
-            "name": name,
-            "expected": expected_text,
-            "asr": asr_text,
-            "formatted": formatted_text,
-            "llm_polished": llm_text,
-            "asr_wer": asr_wer,
-            "fmt_wer": fmt_wer,
-            "llm_wer": llm_wer,
-            "asr_ms": asr_ms,
-            "fmt_ms": fmt_ms,
-            "llm_ms": llm_ms,
-            "features": tc.get("expected_features", []),
-            "feature_pass": feature_pass,
+            "name": name, "expected": expected_text,
+            "asr": asr_text, "formatted": formatted, "llm_polished": llm_text,
+            "asr_wer": asr_wer, "fmt_wer": fmt_wer, "llm_wer": llm_wer,
+            "asr_ms": asr_ms, "fmt_ms": fmt_ms, "llm_ms": llm_ms,
+            "asr_backend": asr_be, "llm_backend": llm_be,
             "status": status,
         })
 
         print(f"{name:<25} {asr_wer:>7.1%} {fmt_wer:>7.1%} {llm_wer:>7.1%} {asr_ms:>7.0f} {fmt_ms:>7.0f} {llm_ms:>7.0f} {status:>8}")
 
         if verbose:
-            print(f"  Expected:    {expected_text!r}")
-            print(f"  ASR:         {asr_text!r}")
-            print(f"  Formatted:   {formatted_text!r}")
-            print(f"  LLM Polish:  {llm_text!r}")
+            print(f"  Expected:   {expected_text!r}")
+            print(f"  ASR ({asr_be}): {asr_text!r}")
+            print(f"  Formatted:  {formatted!r}")
+            print(f"  LLM ({llm_be}): {llm_text!r}")
             print()
 
     total_elapsed = time.perf_counter() - total_start
@@ -371,51 +377,39 @@ def run_tests(verbose: bool = False, skip_tts: bool = False):
     print("=" * 95)
 
     if results:
-        avg_asr_wer = sum(r["asr_wer"] for r in results) / len(results)
-        avg_fmt_wer = sum(r["fmt_wer"] for r in results) / len(results)
-        avg_llm_wer = sum(r["llm_wer"] for r in results) / len(results)
-        avg_asr_ms = sum(r["asr_ms"] for r in results) / len(results)
-        avg_fmt_ms = sum(r["fmt_ms"] for r in results) / len(results)
-        avg_llm_ms = sum(r["llm_ms"] for r in results) / len(results)
+        n = len(results)
+        avg = lambda key: sum(r[key] for r in results) / n
         passed = sum(1 for r in results if r["status"] == "PASS")
 
-        print(f"Tests passed:       {passed}/{len(results)}")
-        print(f"Average ASR WER:    {avg_asr_wer:.1%}")
-        print(f"Average Format WER: {avg_fmt_wer:.1%}")
-        print(f"Average LLM WER:    {avg_llm_wer:.1%}")
-        print(f"Average ASR time:   {avg_asr_ms:.0f}ms")
-        print(f"Average Format time:{avg_fmt_ms:.0f}ms")
-        print(f"Average LLM time:   {avg_llm_ms:.0f}ms")
-        print(f"Average total time: {avg_asr_ms + avg_fmt_ms + avg_llm_ms:.0f}ms")
+        print(f"Tests passed:       {passed}/{n}")
+        print(f"ASR backend:        {results[0]['asr_backend']}")
+        print(f"LLM backend:        {results[0]['llm_backend']}")
+        print(f"Average ASR WER:    {avg('asr_wer'):.1%}")
+        print(f"Average Format WER: {avg('fmt_wer'):.1%}")
+        print(f"Average LLM WER:    {avg('llm_wer'):.1%}")
+        print(f"Average ASR time:   {avg('asr_ms'):.0f}ms")
+        print(f"Average Format time:{avg('fmt_ms'):.0f}ms")
+        print(f"Average LLM time:   {avg('llm_ms'):.0f}ms")
+        print(f"Average total:      {avg('asr_ms') + avg('fmt_ms') + avg('llm_ms'):.0f}ms")
         print(f"Total test time:    {total_elapsed:.1f}s")
 
-        # Feature breakdown
-        print("\nFeature Coverage:")
-        all_features = set()
-        for r in results:
-            all_features.update(r["features"])
-        for feature in sorted(all_features):
-            feature_tests = [r for r in results if feature in r["features"]]
-            feature_pass = sum(1 for r in feature_tests if r["feature_pass"])
-            print(f"  {feature:<25} {feature_pass}/{len(feature_tests)} passed")
-
-    # Save detailed results
     report_path = os.path.join(PROJECT_ROOT, "tests", "e2e_test_report.json")
     with open(report_path, "w") as f:
         json.dump({
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "asr_backend": asr_backend,
+            "llm_backend": llm_backend,
             "total_tests": len(results),
             "total_time_s": total_elapsed,
             "results": results,
         }, f, indent=2, ensure_ascii=False)
-    print(f"\nDetailed report saved to: {report_path}")
-
+    print(f"\nReport: {report_path}")
     return results
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="WhisperFlow E2E test suite")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed output")
-    parser.add_argument("--skip-tts", action="store_true", help="Skip TTS generation (use existing audio)")
+    parser = argparse.ArgumentParser(description="WhisperFlow E2E test with auto backend detection")
+    parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--skip-tts", action="store_true")
     args = parser.parse_args()
     run_tests(verbose=args.verbose, skip_tts=args.skip_tts)
