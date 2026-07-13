@@ -119,13 +119,13 @@ echo.
 :: -----------------------------------------------------------------------
 set "WHISPER_EXE="
 for /r "!EXTRACT_DIR!" %%f in (whisper-cli.exe) do (
-    set "WHISPER_EXE=%%f"
+    if not defined WHISPER_EXE set "WHISPER_EXE=%%f"
 )
 
 if not defined WHISPER_EXE (
     :: Try alternative name (older versions use whisper.exe)
     for /r "!EXTRACT_DIR!" %%f in (whisper.exe) do (
-        set "WHISPER_EXE=%%f"
+        if not defined WHISPER_EXE set "WHISPER_EXE=%%f"
     )
 )
 
@@ -148,28 +148,32 @@ echo =======================================================================
 echo  Installing CUDA binary...
 echo =======================================================================
 
-set "TARGET_DIR=third_party\whisper.cpp-bin\whisper-bin-x64\Release"
+set "TARGET_DIR=%~dp0third_party\whisper.cpp-bin\whisper-bin-x64\Release"
 set "OLD_EXE=!TARGET_DIR!\whisper-cli.exe"
 
 :: Backup old version
 if exist "!OLD_EXE!" (
     copy /Y "!OLD_EXE!" "!OLD_EXE!.cpu-backup" >nul
-    echo [OK] Backed up old CPU version to: !OLD_EXE!.cpu-backup
+    echo [OK] Backed up old CPU version to: whisper-cli.exe.cpu-backup
 )
 
-:: Copy new CUDA version
-copy /Y "!WHISPER_EXE!" "!OLD_EXE!" >nul
+:: Copy new CUDA version — use full absolute paths for both source and target
+echo Copying: "!WHISPER_EXE!" → "!OLD_EXE!"
+copy /Y "!WHISPER_EXE!" "!OLD_EXE!"
 
 if !ERRORLEVEL! NEQ 0 (
     color 0C
     echo [ERROR] Failed to copy CUDA binary to target directory.
     echo Target: !OLD_EXE!
     echo Source: !WHISPER_EXE!
+    echo.
+    echo You can copy it manually:
+    echo   copy "!WHISPER_EXE!" "!OLD_EXE!"
     pause
     exit /b 1
 )
 
-echo [OK] CUDA whisper-cli.exe installed to: !OLD_EXE!
+echo [OK] CUDA whisper-cli.exe installed.
 echo.
 
 :: -----------------------------------------------------------------------
