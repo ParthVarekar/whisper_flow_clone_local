@@ -1,0 +1,57 @@
+# WhisperFlow configuration — whisper.cpp medium.en + gemma-4 LLM cleanup
+#
+# This config uses medium.en (769M, more accurate) instead of small.en (244M).
+# medium.en is ~3-5s ASR vs small.en's ~1.5s, but significantly more accurate.
+#
+# Used by start_medium.bat for testing/comparison.
+
+mode = "auto"
+verbose = false
+writing_style = "default"
+smart_formatting = true
+dictation_hotkey = "ctrl+shift+space"
+command_hotkey = "ctrl+shift+t"
+dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API", "Qwen3-ASR (kwen three)", "Qwen3 (kwen three)", "Moonshine", "crispasr", "CrispASR"]
+
+[transcription]
+backend = "whisper_cpp"
+whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
+model = 'C:\Users\Parth\Desktop\whisper\models\ggml-medium.en.bin'
+language = "en"
+threads = 8
+flash_attention = true
+
+[audio]
+mic_backend = "sounddevice"
+mic_device = "default"
+stream = true
+stream_chunk_s = 1
+stream_max_s = 12
+
+[llm]
+mode = "server"
+llama_server_bin = 'D:\llama4\llama-server.exe'
+llama_cli_bin = 'D:\llama4\llama-cli.exe'
+model = 'C:\Users\Parth\.cache\huggingface\hub\models--unsloth--gemma-4-E4B-it-GGUF\snapshots\e1d90e5fb9f61d8dc71ef016580784a054e5c787\gemma-4-E4B-it-UD-Q4_K_XL.gguf'
+host = "127.0.0.1"
+port = 8081
+n_ctx = 2048
+temperature = 0.3
+max_tokens = 512
+top_p = 0.9
+
+[snippets]
+"my email" = "parth@example.com"
+"my signature" = "Best regards,\nParth"
+
+[app_styles.work_messaging]
+mode = "medium"
+writing_style = "formal"
+
+[app_styles.messaging]
+mode = "light"
+writing_style = "casual"
+
+[app_styles.code]
+mode = "none"
+writing_style = "default"
