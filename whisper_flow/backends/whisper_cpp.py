@@ -126,8 +126,10 @@ class WhisperCppBackend(TranscriptionBackend):
             "-oj",            # JSON output -> <prefix>.json  (final, authoritative)
             "-of", out_prefix,
             "-t", str(c.threads),
-            "-ngl", "99",     # offload all layers to GPU (CUDA build required)
             "-np",            # silence model-load / system_info / timing noise on stderr
+            # NOTE: GPU is used automatically if the binary is compiled with CUDA.
+            # whisper.cpp does NOT use -ngl (that's llama.cpp's flag).
+            # The CUDA binary from whisper.cpp releases uses GPU by default.
         ]
         if initial_prompt and initial_prompt.strip():
             cmd += ["--prompt", initial_prompt.strip()]
