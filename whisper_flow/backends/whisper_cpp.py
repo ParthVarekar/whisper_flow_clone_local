@@ -126,6 +126,7 @@ class WhisperCppBackend(TranscriptionBackend):
             "-oj",            # JSON output -> <prefix>.json  (final, authoritative)
             "-of", out_prefix,
             "-t", str(c.threads),
+            "-ngl", "99",     # offload all layers to GPU (CUDA build required)
             "-np",            # silence model-load / system_info / timing noise on stderr
         ]
         if initial_prompt and initial_prompt.strip():
