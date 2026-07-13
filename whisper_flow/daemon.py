@@ -74,13 +74,13 @@ class Daemon:
         self._hands_free = False
         self._running = False
         self._lock = threading.Lock()
-        self._preview_busy = False  # guard for live preview loop
+        self._preview_active = False  # controls live preview loop
         self._preview_accumulated = ""  # accumulated preview transcript
 
         # Background chunk processing state
         self._chunk_queue = []  # list of (wav_path, timestamp) for chunks to transcribe
         self._chunk_transcribed = ""  # accumulated transcribed text from background chunks
-        self._chunk_processor_running = False
+        self._preview_active = False  # controls live preview loop
         self._last_chunk_time = 0.0
         self._chunk_duration = 4.0  # seconds of audio per chunk
 
@@ -230,20 +230,22 @@ class Daemon:
             )
             self._capture.start()
 
-            # Reset background chunk processing state
+            # Reset preview state
             with self._lock:
-                self._chunk_queue = []
                 self._chunk_transcribed = ""
-                self._chunk_processor_running = False
+                # (legacy flag, kept for compatibility)
                 self._last_chunk_time = time.monotonic()
                 self._preview_accumulated = ""
 
-            # Start background chunk processor — transcribes 4s chunks in the
-            # background while the user is still speaking. This means by the
-            # time the user releases the hotkey, most of the transcription is
-            # already done. The final step is just LLM polishing.
+            # Start a lightweight preview loop — transcribes short rolling windows
+            # every 3s for live popup display only. The final transcript always
+            # comes from a full-audio transcription after recording stops.
+            # Uses a SEPARATE flag (_preview_active) that is NOT unset by the
+            # preview loop itself, preventing the race condition where the loop
+            # unsets the block flag set by _on_dictation_stop.
+            self._preview_active = True
             threading.Thread(
-                target=self._background_chunk_processor, daemon=True
+                target=self._live_preview_loop, daemon=True
             ).start()
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"[whisper-flow] mic error: {exc}\n")
@@ -251,39 +253,29 @@ class Daemon:
             with self._lock:
                 self._recording = False
 
-    def _background_chunk_processor(self) -> None:
-        """Sliding window streaming processor — transcribes growing audio DURING recording.
+    def _live_preview_loop(self) -> None:
+        """Lightweight live preview — shows text in popup during recording.
 
-        ARCHITECTURE (proper streaming, like whisper.cpp / Wispr Flow):
-        Uses a SLIDING WINDOW approach instead of fixed disjoint chunks:
-        - For short audio (<14s): transcribe the ENTIRE audio so far
-          → Full sentence context, no overlap detection needed
-          → Transcript grows naturally, highly accurate
-        - For long audio (14s+): transcribe only the NEW portion since last
-          transcription, with a 2s overlap for continuity
-          → Keeps ASR fast even for long recordings
-          → Overlap detection stitches the pieces together
+        Transcribes a SHORT rolling window (last ~6s) every 3 seconds for
+        live popup display only. The final transcript ALWAYS comes from a
+        full-audio transcription after recording stops.
 
-        This is how whisper.cpp streaming mode works: it processes the growing
-        audio buffer. Wispr Flow uses a similar approach with LLM post-processing.
+        Uses _preview_active flag (set in _on_dictation_start, cleared in
+        _on_dictation_stop) to cleanly stop the loop without race conditions.
 
-        By the time the user releases the hotkey, the transcription is already
-        done — _process_dictation just uses the accumulated text.
+        This is NOT used for the final output — purely for user feedback
+        during recording. The preview text is displayed but never inserted.
         """
-        poll_interval = 2.0  # transcribe every 2s
+        poll_interval = 3.0
         biasing_words = list(self._dictionary) if self._dictionary else []
         initial_p = ", ".join(biasing_words)
 
-        # Track how much audio we've already transcribed (for long recordings)
-        last_transcribed_duration = 0.0
-
         while True:
-            time.sleep(0.3)  # check every 0.3s if ready to transcribe
-            with self._lock:
-                if not self._recording:
-                    break
-                if self._chunk_processor_running:
-                    continue
+            time.sleep(0.5)
+            if not self._preview_active:
+                break
+            if not self._recording:
+                break
 
             capture = self._capture
             if capture is None:
@@ -293,39 +285,21 @@ class Daemon:
             elapsed_since_last = now - self._last_chunk_time
             total_dur = capture.total_duration_sec
 
-            # Wait until enough time has passed and we have enough audio
-            if elapsed_since_last < poll_interval or total_dur < 1.0:
+            if elapsed_since_last < poll_interval or total_dur < 2.0:
                 continue
 
-            with self._lock:
-                if not self._recording:
-                    break
-                self._chunk_processor_running = True
-                self._last_chunk_time = now
+            if not self._preview_active:
+                break
+
+            self._last_chunk_time = now
 
             try:
-                # Decide: full transcription vs incremental
-                # For audio < 14s: transcribe everything (sliding window)
-                # For audio >= 14s: transcribe only new portion (incremental)
-                use_full = total_dur < 14.0
+                wav_path, _, _ = capture.snapshot_window()
+                if not self._preview_active:
+                    if wav_path and os.path.exists(wav_path):
+                        os.remove(wav_path)
+                    break
 
-                if use_full:
-                    # SLIDING WINDOW: transcribe the full audio so far.
-                    # Gives complete sentence context, no overlap detection needed.
-                    wav_path, _, _ = capture.snapshot_full()
-                else:
-                    # INCREMENTAL: transcribe only the rolling window (last ~6s).
-                    # The rolling window captures the newest audio. We use overlap
-                    # detection to stitch it with the previously transcribed text.
-                    wav_path, _, _ = capture.snapshot_window()
-
-                with self._lock:
-                    if not self._recording:
-                        if wav_path and os.path.exists(wav_path):
-                            os.remove(wav_path)
-                        break
-
-                # Transcribe
                 res = self._pipeline.stt.transcribe(
                     wav_path,
                     language=self.cfg.transcription.language,
@@ -335,65 +309,21 @@ class Daemon:
                 if wav_path and os.path.exists(wav_path):
                     os.remove(wav_path)
 
-                chunk_text = res.text.strip()
+                preview_text = res.text.strip()
                 hallucinations = {"[BLANK_AUDIO]", "Thank you for watching", "Thanks for watching.", "Subscribe to my channel", "..."}
-                if not chunk_text or chunk_text in hallucinations or chunk_text.startswith("Thank you for watching"):
+                if not preview_text or preview_text in hallucinations:
                     continue
 
-                with self._lock:
-                    if use_full:
-                        # Full transcription: just use the result directly
-                        self._chunk_transcribed = chunk_text
-                    else:
-                        # Incremental: append with overlap detection
-                        if not self._chunk_transcribed:
-                            self._chunk_transcribed = chunk_text
-                        else:
-                            accumulated = self._chunk_transcribed
-                            acc_words = accumulated.split()
-                            new_words = chunk_text.split()
-
-                            # Find overlap: words from end of accumulated match start of new
-                            max_overlap = min(len(acc_words), len(new_words))
-                            overlap = 0
-                            for n in range(max_overlap, 0, -1):
-                                if acc_words[-n:] == new_words[:n]:
-                                    overlap = n
-                                    break
-
-                            if overlap > 0 and overlap < len(new_words):
-                                new_part = " ".join(new_words[overlap:])
-                                self._chunk_transcribed = accumulated + " " + new_part
-                            elif overlap == 0:
-                                if chunk_text not in accumulated:
-                                    self._chunk_transcribed = accumulated + " " + chunk_text
-
-                    self._preview_accumulated = self._chunk_transcribed
-
-                # Wispr Flow practice: show REFINED text, not raw ASR.
-                try:
-                    from .formatting import apply_smart_formatting
-                    display_text = apply_smart_formatting(
-                        self._chunk_transcribed,
-                        writing_style="default",
-                    )
-                except Exception:  # noqa: BLE001
-                    display_text = self._chunk_transcribed
-
-                self._overlay.on_stream_preview(display_text)
+                self._overlay.on_stream_preview(preview_text)
             except Exception:  # noqa: BLE001
                 pass
-            finally:
-                with self._lock:
-                    self._chunk_processor_running = False
-
     def _on_dictation_stop(self) -> None:
         with self._lock:
             if not self._recording:
                 return
             self._recording = False
-            self._preview_busy = True  # block any new preview/chunk transcriptions
-            self._chunk_processor_running = True  # block chunk processor too
+            self._preview_active = False  # stop the preview loop cleanly
+            # Preview loop is stopped via _preview_active = False above
 
         duration = time.monotonic() - self._record_start_time
         sys.stderr.write(f"[whisper-flow] recording stopped ({duration:.1f}s)\n")
