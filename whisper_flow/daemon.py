@@ -417,13 +417,12 @@ class Daemon:
     def _process_dictation(self, duration: float, app_name: str, app_cat: str, window_title: str = "") -> None:
         """Transcribe, format, cleanup, and insert text.
 
-        Uses background chunk processing: most transcription is already done
-        by _background_chunk_processor during recording. This method uses the
-        accumulated _chunk_transcribed text and only does a final transcription
-        of any remaining audio (the last <4s that wasn't captured as a chunk).
-        Then applies LLM polishing.
+        ALWAYS transcribes the full audio after recording stops. The background
+        chunk processor is only for live preview during recording — its results
+        are NOT used for the final transcript. This ensures accuracy: the full
+        audio gives the model complete sentence context.
         """
-        t_total_start = time.monotonic()  # timing: total processing
+        t_total_start = time.monotonic()
         capture = self._capture
         if capture is None:
             self._overlay.hide()
@@ -443,11 +442,12 @@ class Daemon:
                     self._tray.set_state("idle")
                 return
 
-            # Get the accumulated background transcription
-            with self._lock:
-                accumulated_transcript = self._chunk_transcribed
+            # Get full audio snapshot
+            wav_path, total_dur, _ = capture.snapshot_full()
+            capture.close()
+            self._capture = None
 
-            # Construct acoustic biasing prompt (enriching from Windows window title)
+            # Construct acoustic biasing prompt
             biasing_words = list(self._dictionary) if self._dictionary else []
             if app_name and app_name.strip():
                 biasing_words.append(app_name.strip())
@@ -456,39 +456,21 @@ class Daemon:
                 biasing_words.extend(title_words[:8])
             initial_p = ", ".join(biasing_words)
 
-            # If we have accumulated transcript from background chunks, use it.
-            # Otherwise, fall back to full transcription (short recordings <4s
-            # won't have triggered any background chunks).
-            if accumulated_transcript:
-                transcript = accumulated_transcript
-                stt_ms = 0  # already done in background
-                sys.stderr.write(f"[whisper-flow] ASR: 0ms (background chunks, {len(transcript.split())} words)\n")
+            # ALWAYS transcribe the full audio — never trust background chunks
+            # for the final transcript. Background chunks are for preview only.
+            t_stt_start = time.monotonic()
+            result = self._pipeline.stt.transcribe(
+                wav_path,
+                language=self.cfg.transcription.language,
+                initial_prompt=initial_p,
+            )
+            stt_ms = (time.monotonic() - t_stt_start) * 1000
+            transcript = result.text.strip()
 
-                # Get full audio for cleanup (but don't transcribe it again)
-                wav_path, total_dur, _ = capture.snapshot_full()
-                capture.close()
-                self._capture = None
-                if wav_path and os.path.exists(wav_path):
-                    os.remove(wav_path)
-            else:
-                # No background transcription — transcribe the full audio
-                wav_path, total_dur, _ = capture.snapshot_full()
-                capture.close()
-                self._capture = None
+            if wav_path and os.path.exists(wav_path):
+                os.remove(wav_path)
 
-                t_stt_start = time.monotonic()
-                result = self._pipeline.stt.transcribe(
-                    wav_path,
-                    language=self.cfg.transcription.language,
-                    initial_prompt=initial_p,
-                )
-                stt_ms = (time.monotonic() - t_stt_start) * 1000
-                transcript = result.text.strip()
-
-                if wav_path and os.path.exists(wav_path):
-                    os.remove(wav_path)
-
-                sys.stderr.write(f"[whisper-flow] ASR: {stt_ms:.0f}ms\n")
+            sys.stderr.write(f"[whisper-flow] ASR: {stt_ms:.0f}ms\n")
 
             if not transcript:
                 sys.stderr.write(

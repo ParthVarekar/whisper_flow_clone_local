@@ -63,7 +63,9 @@ _NEWLINE_WORDS = [
 # ---------------------------------------------------------------------------
 _BACKTRACK_MARKERS = (
     "actually",
-    "i mean",
+    "i mean ",  # trailing space to avoid matching "i meant"
+    "i mean,",
+    "i mean.",
     "sorry",
     "scratch that",
     "rather",
@@ -182,6 +184,14 @@ _TIME_PATTERN = re.compile(
     r"(?:twelve|one|two|three|four|five|six|seven|eight|nine|ten|eleven)\s+o'?clock"
     r")\s*"
     r"(a\.?m\.?|p\.?m\.?)?\b",
+    flags=re.IGNORECASE,
+)
+
+# Also handle compound minutes that the main regex might miss
+# e.g. "four forty five" → the main regex matches "four forty", leaving "five"
+# This post-fix handles the leftover by merging "4:40five" or "4:40 five" → "4:45"
+_TIME_COMPOUND_FIX = re.compile(
+    r"(\d+):(\d+)(?:\s*)(five|ten)\b",
     flags=re.IGNORECASE,
 )
 
@@ -319,14 +329,12 @@ def _apply_fillers(text: str) -> str:
 
 
 def _apply_backtrack(text: str) -> str:
-    # H10 FIX: backtrack should remove the PRIOR sentence, not just edit
-    # the current one. "I went to the store. Actually I went to the market."
+    # Backtrack correction: "I went to the store. Actually I went to the market."
     # should become "I went to the market."
     #
-    # re.split with a capture group produces: [sent0, sep0, sent1, sep1, ...]
-    # where sep elements are the punctuation + whitespace (e.g. ". ").
-    # When a backtrack marker is found in sent_i, we pop BOTH sep_{i-1} AND
-    # sent_{i-1} from the rebuilt list (two non-empty entries).
+    # Only removes ONE prior sentence per backtrack marker — not all prior
+    # sentences. This prevents over-aggressive deletion when there are
+    # multiple backtrack markers in sequence.
     sentences = re.split(r"([.!?]\s+)", text)
     rebuilt: list[str] = []
     for part in sentences:
@@ -335,12 +343,18 @@ def _apply_backtrack(text: str) -> str:
         if marker:
             idx = lowered.find(marker)
             suffix = part[idx + len(marker):].strip(" ,")
-            # Pop TWO non-empty entries: the separator AND the prior sentence.
-            for _ in range(2):
+            # Remove ONLY the immediately preceding sentence + its separator.
+            # Pop the separator first, then the sentence.
+            if rebuilt:
                 while rebuilt and not rebuilt[-1].strip():
                     rebuilt.pop()
                 if rebuilt:
+                    rebuilt.pop()  # separator
+            if rebuilt:
+                while rebuilt and not rebuilt[-1].strip():
                     rebuilt.pop()
+                if rebuilt:
+                    rebuilt.pop()  # sentence
             if len(suffix.split()) >= 1:
                 rebuilt.append(suffix)
             continue
@@ -514,6 +528,17 @@ def _apply_itn_time(text: str) -> str:
     out = re.sub(r"\bo['\s]?clock\b", "o'clock", text, flags=re.IGNORECASE)
     # Run the time regex first (converts "three thirty" → "3:30")
     out = _TIME_PATTERN.sub(repl, out)
+
+    # Fix compound minutes: "4:40 five" → "4:45", "3:20 ten" → "3:30"
+    def _compound_fix(m: re.Match) -> str:
+        hour = int(m.group(1))
+        minute = int(m.group(2))
+        leftover = m.group(3).lower()
+        add = {"five": 5, "ten": 10}.get(leftover, 0)
+        return f"{hour}:{minute + add:02d}"
+
+    out = _TIME_COMPOUND_FIX.sub(_compound_fix, out)
+
     # Fix "p M" / "a M" (Moonshine sometimes outputs AM/PM with a space).
     # Only match when preceded by a digit (time context) to avoid matching
     # "am" in "I am going" or "pm" in standalone text.
