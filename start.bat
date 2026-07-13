@@ -5,7 +5,7 @@ cd /d "%~dp0"
 cls
 echo =======================================================================
 echo               WHISPER FLOW - ONE-CLICK LAUNCHER
-echo            Qwen3-ASR (1.7B) + LLM cleanup (gemma-4)
+echo            whisper.cpp (small.en) + LLM cleanup (gemma-4)
 echo =======================================================================
 echo.
 
@@ -82,35 +82,39 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 :: -----------------------------------------------------------------------
-:: 4. Verify Qwen3-ASR binary and model files exist
+:: 4. Verify whisper.cpp binary and model files exist
 :: -----------------------------------------------------------------------
-echo [CHECK] Verifying Qwen3-ASR installation...
+echo [CHECK] Verifying whisper.cpp installation...
 
-set "QWEN_BIN=C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe"
-set "QWEN_MODEL=C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf"
+set "WHISPER_BIN=C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe"
+set "WHISPER_MODEL_SMALL=C:\Users\Parth\Desktop\whisper\models\ggml-small.en.bin"
+set "WHISPER_MODEL_MEDIUM=C:\Users\Parth\Desktop\whisper\models\ggml-medium.en.bin"
 
 set "ALL_FOUND=1"
 
-if not exist "%QWEN_BIN%" (
+if not exist "%WHISPER_BIN%" (
     color 0E
-    echo [WARNING] crispasr.exe not found at:
-    echo   %QWEN_BIN%
+    echo [WARNING] whisper-cli.exe not found at:
+    echo   %WHISPER_BIN%
     echo.
     set "ALL_FOUND=0"
     color 0A
 )
 
-if not exist "%QWEN_MODEL%" (
+if not exist "%WHISPER_MODEL_SMALL%" (
     color 0E
-    echo [WARNING] Qwen3-ASR model not found at:
-    echo   %QWEN_MODEL%
+    echo [WARNING] ggml-small.en.bin not found at:
+    echo   %WHISPER_MODEL_SMALL%
+    echo   Run download_models.bat to download it.
     echo.
     set "ALL_FOUND=0"
     color 0A
+) else (
+    echo [OK] ggml-small.en.bin found.
 )
 
-if "%ALL_FOUND%"=="1" (
-    echo [OK] Qwen3-ASR binary and model found.
+if exist "%WHISPER_MODEL_MEDIUM%" (
+    echo [OK] ggml-medium.en.bin found ^(available as alternative^).
 )
 
 :: -----------------------------------------------------------------------
@@ -145,7 +149,7 @@ echo.
 echo =======================================================================
 echo   Starting WhisperFlow Daemon...
 echo.
-echo   Backend:  Qwen3-ASR (1.7B) + LLM cleanup (gemma-4)
+echo   Backend:  whisper.cpp (small.en) + LLM cleanup (gemma-4)
 echo   Config:   config.llama4.toml
 echo.
 echo   Dictation hotkey:  Ctrl+Shift+Space  (hold to record)

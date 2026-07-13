@@ -175,111 +175,193 @@ class WhisperCppBackend(TranscriptionBackend):
         if not os.path.isfile(audio_path):
             raise TranscriptionError(f"audio file not found: {audio_path!r}")
 
+        # Apply AGC (automatic gain control) before transcription.
+        # Amplifies quiet audio so the model gets a strong signal.
+        amplified_path = self._apply_agc(audio_path)
+
         with self._transcribe_lock:
             self._cancel_requested = False
             want_progress = on_progress is not None
-            with tempfile.TemporaryDirectory(prefix="whisperflow_") as tmp:
-                out_prefix = os.path.join(tmp, "out")
-                cmd = self._build_cmd(audio_path, out_prefix, language,
-                                      initial_prompt=initial_prompt, want_progress=want_progress)
-                self._log(f"running: {' '.join(cmd)}")
+            try:
+                with tempfile.TemporaryDirectory(prefix="whisperflow_") as tmp:
+                    out_prefix = os.path.join(tmp, "out")
+                    cmd = self._build_cmd(amplified_path, out_prefix, language,
+                                          initial_prompt=initial_prompt, want_progress=want_progress)
+                    self._log(f"running: {' '.join(cmd)}")
 
-                stderr_tail: list[str] = []
-                try:
-                    self._proc = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        bufsize=1,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                    )
-                except FileNotFoundError as exc:
-                    self._proc = None
-                    raise BinaryNotFoundError(self.cfg.whisper_bin, str(exc)) from exc
-
-                local_proc = self._proc
-
-                # Two reader threads so neither pipe can deadlock the other.
-                def _read_stderr() -> None:
-                    if local_proc is None or local_proc.stderr is None:
-                        return
-                    for line in local_proc.stderr:
-                        line = line.rstrip("\n")
-                        if not line:
-                            continue
-                        stderr_tail.append(line)
-                        self._log(f"[stderr] {line}")
-                        if on_progress is not None:
-                            pct = parse_progress_line(line)
-                            if pct is not None:
-                                try:
-                                    on_progress(pct, "")
-                                except Exception:  # noqa: BLE001 — notifier must never break STT
-                                    pass
-
-                def _read_stdout() -> None:
-                    if local_proc is None or local_proc.stdout is None:
-                        return
-                    for line in local_proc.stdout:
-                        if on_segment is None:
-                            continue
-                        parsed = parse_segment_line(line)
-                        if parsed is None:
-                            continue
-                        start_ts, end_ts, text = parsed
-                        try:
-                            on_segment(text, f"{start_ts} --> {end_ts}")
-                        except Exception:  # noqa: BLE001
-                            pass
-
-                t_err = threading.Thread(target=_read_stderr, daemon=True)
-                t_out = threading.Thread(target=_read_stdout, daemon=True)
-                t_err.start()
-                t_out.start()
-                if local_proc is not None:
-                    local_proc.wait()
-                t_err.join(timeout=2.0)
-                t_out.join(timeout=2.0)
-                self._proc = None
-
-                if self._cancel_requested:
-                    # still try to recover partial output below before raising
-                    partial = self._try_parse_partial(out_prefix + ".json")
-                    if partial is not None:
-                        partial.raw["_partial"] = True
-                        raise CancelledError(
-                            f"transcription cancelled by user (partial: {len(partial.segments)} segments)"
+                    stderr_tail: list[str] = []
+                    try:
+                        self._proc = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            bufsize=1,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
                         )
-                    raise CancelledError("transcription cancelled by user")
+                    except FileNotFoundError as exc:
+                        self._proc = None
+                        raise BinaryNotFoundError(self.cfg.whisper_bin, str(exc)) from exc
 
-                if local_proc is not None and local_proc.returncode != 0:
-                    # crashed subprocess: attempt partial recovery from any JSON written
-                    partial = self._try_parse_partial(out_prefix + ".json")
-                    if partial is not None and partial.segments:
-                        partial.raw["_partial"] = True
-                        self._log(f"whisper-cli crashed (code {local_proc.returncode}) — recovered {len(partial.segments)} partial segments")
-                        return partial
-                    raise TranscriptionError(
-                        f"whisper-cli exited with code {local_proc.returncode}\n"
-                        + "\n".join(stderr_tail[-30:]).strip()
-                    )
+                    local_proc = self._proc
 
-                json_path = out_prefix + ".json"
-                if not os.path.isfile(json_path):
-                    raise TranscriptionError(
-                        f"whisper-cli produced no JSON output (expected {json_path}).\n"
-                        + "\n".join(stderr_tail[-30:]).strip()
-                    )
-                result = self._parse_json(json_path)
-                if not result.segments and not result.text:
-                    raise TranscriptionError(
-                        "empty transcript — audio may be silent, too quiet, or in an "
-                        "unsupported language. Try a different language flag or check the "
-                        "recording level."
-                    )
-                return result
+                    # Two reader threads so neither pipe can deadlock the other.
+                    def _read_stderr() -> None:
+                        if local_proc is None or local_proc.stderr is None:
+                            return
+                        for line in local_proc.stderr:
+                            line = line.rstrip("\n")
+                            if not line:
+                                continue
+                            stderr_tail.append(line)
+                            self._log(f"[stderr] {line}")
+                            if on_progress is not None:
+                                pct = parse_progress_line(line)
+                                if pct is not None:
+                                    try:
+                                        on_progress(pct, "")
+                                    except Exception:  # noqa: BLE001 — notifier must never break STT
+                                        pass
+
+                    def _read_stdout() -> None:
+                        if local_proc is None or local_proc.stdout is None:
+                            return
+                        for line in local_proc.stdout:
+                            if on_segment is None:
+                                continue
+                            parsed = parse_segment_line(line)
+                            if parsed is None:
+                                continue
+                            start_ts, end_ts, text = parsed
+                            try:
+                                on_segment(text, f"{start_ts} --> {end_ts}")
+                            except Exception:  # noqa: BLE001
+                                pass
+
+                    t_err = threading.Thread(target=_read_stderr, daemon=True)
+                    t_out = threading.Thread(target=_read_stdout, daemon=True)
+                    t_err.start()
+                    t_out.start()
+                    if local_proc is not None:
+                        local_proc.wait()
+                    t_err.join(timeout=2.0)
+                    t_out.join(timeout=2.0)
+                    self._proc = None
+
+                    if self._cancel_requested:
+                        # still try to recover partial output below before raising
+                        partial = self._try_parse_partial(out_prefix + ".json")
+                        if partial is not None:
+                            partial.raw["_partial"] = True
+                            raise CancelledError(
+                                f"transcription cancelled by user (partial: {len(partial.segments)} segments)"
+                            )
+                        raise CancelledError("transcription cancelled by user")
+
+                    if local_proc is not None and local_proc.returncode != 0:
+                        # crashed subprocess: attempt partial recovery from any JSON written
+                        partial = self._try_parse_partial(out_prefix + ".json")
+                        if partial is not None and partial.segments:
+                            partial.raw["_partial"] = True
+                            self._log(f"whisper-cli crashed (code {local_proc.returncode}) — recovered {len(partial.segments)} partial segments")
+                            return partial
+                        raise TranscriptionError(
+                            f"whisper-cli exited with code {local_proc.returncode}\n"
+                            + "\n".join(stderr_tail[-30:]).strip()
+                        )
+
+                    json_path = out_prefix + ".json"
+                    if not os.path.isfile(json_path):
+                        raise TranscriptionError(
+                            f"whisper-cli produced no JSON output (expected {json_path}).\n"
+                            + "\n".join(stderr_tail[-30:]).strip()
+                        )
+                    result = self._parse_json(json_path)
+                    if not result.segments and not result.text:
+                        raise TranscriptionError(
+                            "empty transcript — audio may be silent, too quiet, or in an "
+                            "unsupported language. Try a different language flag or check the "
+                            "recording level."
+                        )
+                    return result
+            finally:
+                # Clean up the amplified temp file (if different from original)
+                if amplified_path != audio_path:
+                    try:
+                        os.remove(amplified_path)
+                    except OSError:
+                        pass
+
+    def _apply_agc(self, wav_path: str) -> str:
+        """Apply automatic gain control to amplify quiet audio.
+
+        Same logic as Qwen3AsrBackend._apply_agc — amplifies audio to a
+        target RMS of 0.15 so the model gets a strong signal.
+        """
+        try:
+            import numpy as np
+            import wave
+            import tempfile
+        except ImportError:
+            return wav_path
+
+        try:
+            with wave.open(wav_path, "rb") as w:
+                sr = w.getframerate()
+                nch = w.getnchannels()
+                sampwidth = w.getsampwidth()
+                nframes = w.getnframes()
+                raw = w.readframes(nframes)
+
+            if sampwidth != 2:
+                return wav_path
+
+            samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            if nch > 1:
+                samples = samples[::nch]
+
+            if len(samples) == 0:
+                return wav_path
+
+            frame_len = int(0.02 * sr)
+            n_frames = len(samples) // frame_len
+            if n_frames < 2:
+                return wav_path
+
+            frames = samples[:n_frames * frame_len].reshape(n_frames, frame_len)
+            frame_rms = np.sqrt(np.mean(frames ** 2, axis=1))
+            speech_rms = float(np.percentile(frame_rms, 90))
+
+            if speech_rms < 0.001:
+                return wav_path
+
+            target_rms = 0.15
+            gain = min(10.0, target_rms / speech_rms)
+
+            if gain < 1.2:
+                return wav_path
+
+            amplified = np.clip(samples * gain, -1.0, 1.0)
+            int16_audio = (amplified * 32767.0).astype(np.int16)
+            tmp = tempfile.NamedTemporaryFile(
+                prefix="wf_agc_", suffix=".wav", delete=False, dir=tempfile.gettempdir()
+            )
+            out_path = tmp.name
+            tmp.close()
+
+            with wave.open(out_path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sr)
+                w.writeframes(int16_audio.tobytes())
+
+            if self.verbose:
+                import sys
+                sys.stderr.write(f"[whisper-cpp] AGC: gain={gain:.1f}x\n")
+            return out_path
+        except Exception:
+            return wav_path
 
     def _try_parse_partial(self, json_path: str) -> Optional[TranscriptionResult]:
         """Best-effort parse of a partial JSON file (whisper-cli may have flushed
