@@ -6,27 +6,20 @@ cd /d "%~dp0"
 cls
 
 :: =======================================================================
-:: First-run check: if setup hasn't been done, run it automatically
+:: First-run check: if setup hasn't been done, tell the user
 :: =======================================================================
-if not exist ".venv\Scripts\activate.bat" (
-    if not exist ".qa-venv\Scripts\activate.bat" (
-        echo [SETUP] First run detected. Running setup automatically...
-        echo.
-        call setup.bat
-        if !ERRORLEVEL! NEQ 0 (
-            echo [ERROR] Setup failed. Please run setup.bat manually.
-            pause
-            exit /b 1
-        )
-        cd /d "%~dp0"
-    )
-)
-
-:: Also check if models are missing
 if not exist "models\ggml-small.en.bin" (
-    echo [SETUP] Models not found. Running setup...
-    call setup.bat
-    cd /d "%~dp0"
+    if not exist "bin\whisper-cli.exe" (
+        echo =======================================================================
+        echo   FIRST RUN DETECTED
+        echo =======================================================================
+        echo.
+        echo   Please run setup.bat first to download models and binaries.
+        echo   After setup completes, run start.bat again.
+        echo.
+        pause
+        exit /b 0
+    )
 )
 
 echo =======================================================================
