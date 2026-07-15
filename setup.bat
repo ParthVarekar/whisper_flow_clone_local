@@ -1,19 +1,20 @@
 @echo off
 setlocal enabledelayedexpansion
-title WhisperFlow Setup — One-Time Installation
+title WhisperFlow Setup — Universal Installer
 color 0B
 cd /d "%~dp0"
 cls
 echo =======================================================================
-echo               WHISPERFLOW SETUP
-echo         One-time installation — run this first
+echo               WHISPERFLOW UNIVERSAL SETUP
+echo         One-time installation — works on any device
 echo =======================================================================
 echo.
-echo This script sets up everything WhisperFlow needs:
+echo This script auto-detects your hardware and installs:
 echo   1. Python virtual environment + dependencies
-echo   2. whisper.cpp small.en model (466MB)
-echo   3. CUDA-accelerated whisper-cli.exe (266MB, GPU)
-echo   4. llama-server + gemma-4 LLM model (auto-download)
+echo   2. whisper.cpp model (small.en, 466MB)
+echo   3. whisper-cli.exe (CUDA x64 / CPU x64 / CPU ARM64 / macOS)
+echo   4. llama-server.exe (CUDA x64 / CPU x64 / CPU ARM64 / macOS)
+echo   5. Gemma-4 E4B LLM model (Q4_K_XL, ~2.5GB)
 echo.
 echo After setup, just run start.bat to use WhisperFlow.
 echo.
@@ -25,7 +26,7 @@ pause >nul
 :: =======================================================================
 cls
 echo =======================================================================
-echo  [1/5] Checking Python...
+echo  [1/6] Checking Python...
 echo =======================================================================
 where python >nul 2>&1
 if !ERRORLEVEL! NEQ 0 (
@@ -44,10 +45,9 @@ echo.
 :: STEP 2: Create/activate virtual environment
 :: =======================================================================
 echo =======================================================================
-echo  [2/5] Setting up virtual environment...
+echo  [2/6] Setting up virtual environment...
 echo =======================================================================
 
-:: Use existing venv if present, otherwise create one
 set "VENV_DIR="
 if exist ".qa-venv\Scripts\activate.bat" set "VENV_DIR=.qa-venv"
 if exist ".venv\Scripts\activate.bat" set "VENV_DIR=.venv"
@@ -68,40 +68,37 @@ echo.
 :: STEP 3: Install Python dependencies
 :: =======================================================================
 echo =======================================================================
-echo  [3/5] Installing Python dependencies...
+echo  [3/6] Installing Python dependencies...
 echo =======================================================================
-echo This installs: sounddevice, pynput, pystray, Pillow, numpy, pyperclip, tomli
-echo.
-
 python -m pip install --upgrade pip >nul 2>&1
 
 echo Installing sounddevice...
-python -c "import sounddevice" >nul 2>&1 || python -m pip install sounddevice
+python -c "import sounddevice" >nul 2>&1 || python -m pip install sounddevice -q
 echo Installing pynput...
-python -c "import pynput" >nul 2>&1 || python -m pip install pynput
+python -c "import pynput" >nul 2>&1 || python -m pip install pynput -q
 echo Installing pystray + Pillow...
-python -c "import pystray" >nul 2>&1 || python -m pip install pystray Pillow
+python -c "import pystray" >nul 2>&1 || python -m pip install pystray Pillow -q
 echo Installing numpy...
-python -c "import numpy" >nul 2>&1 || python -m pip install numpy
+python -c "import numpy" >nul 2>&1 || python -m pip install numpy -q
 echo Installing pyperclip...
-python -c "import pyperclip" >nul 2>&1 || python -m pip install pyperclip
-echo Installing tomli (for Python <3.11)...
-python -c "import tomllib" >nul 2>&1 || (python -c "import tomli" >nul 2>&1 || python -m pip install tomli)
+python -c "import pyperclip" >nul 2>&1 || python -m pip install pyperclip -q
+echo Installing tomli...
+python -c "import tomllib" >nul 2>&1 || (python -c "import tomli" >nul 2>&1 || python -m pip install tomli -q)
 
-echo.
 echo [OK] Python dependencies installed.
 echo.
 
 :: =======================================================================
-:: STEP 4: Download whisper.cpp small.en model
+:: STEP 4: Download whisper.cpp model + binary
 :: =======================================================================
 echo =======================================================================
-echo  [4/5] Downloading whisper.cpp models...
+echo  [4/6] Downloading whisper.cpp model + binary...
 echo =======================================================================
 
 if not exist "models" mkdir models
+if not exist "bin" mkdir bin
 
-:: small.en (466MB)
+:: --- Download small.en model (466MB) ---
 if exist "models\ggml-small.en.bin" (
     echo [SKIP] ggml-small.en.bin already exists.
 ) else (
@@ -109,111 +106,214 @@ if exist "models\ggml-small.en.bin" (
     curl -L --fail --progress-bar -o "models\ggml-small.en.bin" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin"
     if !ERRORLEVEL! NEQ 0 (
         color 0E
-        echo [WARNING] Failed to download small.en. You can download manually later.
-        echo URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+        echo [WARNING] Failed to download small.en model.
     ) else (
-        echo [OK] ggml-small.en.bin downloaded.
+        echo [OK] Model downloaded.
     )
 )
 
-:: medium.en (1.5GB) — optional, skip if fails
-if exist "models\ggml-medium.en.bin" (
-    echo [SKIP] ggml-medium.en.bin already exists.
+:: --- Download whisper-cli.exe (architecture-specific) ---
+if exist "bin\whisper-cli.exe" (
+    echo [SKIP] whisper-cli.exe already exists in bin\.
 ) else (
     echo.
-    echo Downloading ggml-medium.en.bin (1.5GB) — optional, for testing...
-    curl -L --fail --progress-bar -o "models\ggml-medium.en.bin" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin"
-    if !ERRORLEVEL! NEQ 0 (
-        echo [INFO] medium.en download failed — that's OK, small.en is enough.
+    echo Detecting architecture...
+    set "ARCH=%PROCESSOR_ARCHITECTURE%"
+    echo Architecture: !ARCH!
+
+    if "!ARCH!"=="AMD64" (
+        echo [DOWNLOAD] Downloading CUDA whisper-cli.exe for x64 (266MB)...
+        set "WHISPER_ZIP=%TEMP%\whisper_cuda.zip"
+        curl -L --fail --progress-bar -o "!WHISPER_ZIP!" "https://github.com/ggerganov/whisper.cpp/releases/download/v1.9.1/whisper-cublas-12.4.0-bin-x64.zip"
+        if !ERRORLEVEL! NEQ 0 (
+            echo [WARNING] CUDA binary failed. Trying CPU-only...
+            curl -L --fail --progress-bar -o "!WHISPER_ZIP!" "https://github.com/ggerganov/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip"
+        )
+    ) else if "!ARCH!"=="ARM64" (
+        echo [DOWNLOAD] Downloading whisper-cli for ARM64...
+        set "WHISPER_ZIP=%TEMP%\whisper_arm64.zip"
+        :: ARM64 Windows — try OpenCL Adreno build, fallback to CPU
+        curl -L --fail --progress-bar -o "!WHISPER_ZIP!" "https://github.com/ggerganov/whisper.cpp/releases/download/v1.9.1/whisper-bin-ubuntu-arm64.tar.gz"
+        if !ERRORLEVEL! NEQ 0 (
+            echo [WARNING] ARM64 build not available. Will try CPU x64 via emulation.
+            curl -L --fail --progress-bar -o "!WHISPER_ZIP!" "https://github.com/ggerganov/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip"
+        )
     ) else (
-        echo [OK] ggml-medium.en.bin downloaded.
+        echo [DOWNLOAD] Downloading CPU whisper-cli.exe for !ARCH!...
+        set "WHISPER_ZIP=%TEMP%\whisper_cpu.zip"
+        curl -L --fail --progress-bar -o "!WHISPER_ZIP!" "https://github.com/ggerganov/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip"
+    )
+
+    :: Extract
+    if exist "!WHISPER_ZIP!" (
+        set "EXTRACT_DIR=%TEMP%\whisper_extract"
+        if exist "!EXTRACT_DIR!" rmdir /s /q "!EXTRACT_DIR!"
+        mkdir "!EXTRACT_DIR!"
+
+        :: Try tar (Windows 10+) then PowerShell
+        tar -xf "!WHISPER_ZIP!" -C "!EXTRACT_DIR!" 2>nul
+        if !ERRORLEVEL! NEQ 0 (
+            powershell -Command "Expand-Archive -Path '!WHISPER_ZIP!' -DestinationPath '!EXTRACT_DIR!' -Force" 2>nul
+        )
+
+        :: Find whisper-cli.exe
+        set "FOUND_EXE="
+        for /r "!EXTRACT_DIR!" %%f in (whisper-cli.exe) do (
+            if not defined FOUND_EXE set "FOUND_EXE=%%f"
+        )
+        if not defined FOUND_EXE (
+            for /r "!EXTRACT_DIR!" %%f in (whisper.exe) do (
+                if not defined FOUND_EXE set "FOUND_EXE=%%f"
+            )
+        )
+
+        if defined FOUND_EXE (
+            copy /Y "!FOUND_EXE!" "bin\whisper-cli.exe" >nul
+            echo [OK] whisper-cli.exe installed to bin\
+            :: Copy DLLs
+            for /r "!EXTRACT_DIR!" %%f in (*.dll) do (
+                copy /Y "%%f" "bin\" >nul 2>&1
+            )
+        ) else (
+            echo [WARNING] Could not find whisper-cli.exe in download.
+        )
+
+        :: Cleanup
+        rmdir /s /q "!EXTRACT_DIR!" 2>nul
+        del "!WHISPER_ZIP!" 2>nul
+    ) else (
+        echo [WARNING] Could not download whisper-cli.exe.
+        echo You can build it from source: https://github.com/ggml-org/whisper.cpp
     )
 )
 echo.
 
 :: =======================================================================
-:: STEP 5: Install CUDA-accelerated whisper-cli.exe
+:: STEP 5: Download llama-server + Gemma-4 model
 :: =======================================================================
 echo =======================================================================
-echo  [5/5] Installing CUDA whisper-cli.exe (GPU acceleration)...
+echo  [5/6] Downloading llama-server + Gemma-4 LLM model...
 echo =======================================================================
 
-set "WHISPER_TARGET=%~dp0third_party\whisper.cpp-bin\whisper-bin-x64\Release"
+:: --- Download llama-server.exe (architecture-specific) ---
+if exist "bin\llama-server.exe" (
+    echo [SKIP] llama-server.exe already exists in bin\.
+) else (
+    echo Detecting architecture for llama-server...
+    set "ARCH=%PROCESSOR_ARCHITECTURE%"
+    set "LLAMA_TAG=b10015"
 
-:: Check if CUDA binary already installed (skip if already done)
-if exist "!WHISPER_TARGET!\whisper-cli.exe" (
-    echo [CHECK] whisper-cli.exe already exists. Checking if it's CUDA-enabled...
-    :: Try a quick test — if it runs without -ngl and produces output, it's working
-    echo [OK] Using existing whisper-cli.exe ^(re-run install_cuda_whisper.bat to upgrade^).
-    goto :skip_cuda
+    if "!ARCH!"=="AMD64" (
+        echo [DOWNLOAD] Downloading CUDA llama-server for x64...
+        set "LLAMA_ZIP=%TEMP%\llama_cuda.zip"
+        curl -L --fail --progress-bar -o "!LLAMA_ZIP!" "https://github.com/ggml-org/llama.cpp/releases/download/!LLAMA_TAG!/llama-!LLAMA_TAG!-bin-win-cuda-12.4-x64.zip"
+        if !ERRORLEVEL! NEQ 0 (
+            echo [WARNING] CUDA binary failed. Trying CPU-only...
+            curl -L --fail --progress-bar -o "!LLAMA_ZIP!" "https://github.com/ggml-org/llama.cpp/releases/download/!LLAMA_TAG!/llama-!LLAMA_TAG!-bin-win-cpu-x64.zip"
+        )
+        :: Also download CUDA runtime DLLs
+        set "CUDA_RT_ZIP=%TEMP%\llama_cudart.zip"
+        curl -L --fail --progress-bar -o "!CUDA_RT_ZIP!" "https://github.com/ggml-org/llama.cpp/releases/download/!LLAMA_TAG!/cudart-llama-bin-win-cuda-12.4-x64.zip" 2>nul
+    ) else if "!ARCH!"=="ARM64" (
+        echo [DOWNLOAD] Downloading llama-server for ARM64...
+        set "LLAMA_ZIP=%TEMP%\llama_arm64.zip"
+        curl -L --fail --progress-bar -o "!LLAMA_ZIP!" "https://github.com/ggml-org/llama.cpp/releases/download/!LLAMA_TAG!/llama-!LLAMA_TAG!-bin-win-cpu-arm64.zip"
+    ) else (
+        echo [DOWNLOAD] Downloading CPU llama-server for !ARCH!...
+        set "LLAMA_ZIP=%TEMP%\llama_cpu.zip"
+        curl -L --fail --progress-bar -o "!LLAMA_ZIP!" "https://github.com/ggml-org/llama.cpp/releases/download/!LLAMA_TAG!/llama-!LLAMA_TAG!-bin-win-cpu-x64.zip"
+    )
+
+    :: Extract
+    if exist "!LLAMA_ZIP!" (
+        set "EXTRACT_DIR=%TEMP%\llama_extract"
+        if exist "!EXTRACT_DIR!" rmdir /s /q "!EXTRACT_DIR!"
+        mkdir "!EXTRACT_DIR!"
+
+        tar -xf "!LLAMA_ZIP!" -C "!EXTRACT_DIR!" 2>nul
+        if !ERRORLEVEL! NEQ 0 (
+            powershell -Command "Expand-Archive -Path '!LLAMA_ZIP!' -DestinationPath '!EXTRACT_DIR!' -Force" 2>nul
+        )
+
+        :: Find llama-server.exe
+        set "FOUND_SERVER="
+        for /r "!EXTRACT_DIR!" %%f in (llama-server.exe) do (
+            if not defined FOUND_SERVER set "FOUND_SERVER=%%f"
+        )
+
+        if defined FOUND_SERVER (
+            copy /Y "!FOUND_SERVER!" "bin\llama-server.exe" >nul
+            echo [OK] llama-server.exe installed to bin\
+            :: Copy all DLLs and helper binaries
+            for /r "!EXTRACT_DIR!" %%f in (*.dll) do (
+                copy /Y "%%f" "bin\" >nul 2>&1
+            )
+            :: Also copy llama-cli.exe if present (used for fallback)
+            for /r "!EXTRACT_DIR!" %%f in (llama-cli.exe) do (
+                copy /Y "%%f" "bin\llama-cli.exe" >nul 2>&1
+            )
+        ) else (
+            echo [WARNING] Could not find llama-server.exe in download.
+        )
+
+        :: Extract CUDA runtime DLLs if downloaded
+        if exist "!CUDA_RT_ZIP!" (
+            tar -xf "!CUDA_RT_ZIP!" -C "!EXTRACT_DIR!" 2>nul
+            for /r "!EXTRACT_DIR!" %%f in (*.dll) do (
+                copy /Y "%%f" "bin\" >nul 2>&1
+            )
+            del "!CUDA_RT_ZIP!" 2>nul
+        )
+
+        :: Cleanup
+        rmdir /s /q "!EXTRACT_DIR!" 2>nul
+        del "!LLAMA_ZIP!" 2>nul
+    ) else (
+        echo [WARNING] Could not download llama-server.
+        echo LLM cleanup will be disabled — daemon falls back to raw transcript.
+    )
 )
 
-:: Download CUDA binary
-echo Downloading CUDA-accelerated whisper-cli.exe (266MB)...
-echo This enables GPU acceleration for 10-20x faster transcription.
-echo.
-
-set "TEMP_DIR=%TEMP%\whisper_cuda_setup"
-if exist "!TEMP_DIR!" rmdir /s /q "!TEMP_DIR!"
-mkdir "!TEMP_DIR!"
-
-set "ZIP_PATH=!TEMP_DIR!\whisper-cublas-12.4.0-bin-x64.zip"
-curl -L --fail --progress-bar -o "!ZIP_PATH!" "https://github.com/ggerganov/whisper.cpp/releases/download/v1.9.1/whisper-cublas-12.4.0-bin-x64.zip"
-
-if !ERRORLEVEL! NEQ 0 (
-    echo [WARNING] CUDA 12.4 failed. Trying CUDA 11.8...
-    set "ZIP_PATH=!TEMP_DIR!\whisper-cublas-11.8.0-bin-x64.zip"
-    curl -L --fail --progress-bar -o "!ZIP_PATH!" "https://github.com/ggerganov/whisper.cpp/releases/download/v1.9.1/whisper-cublas-11.8.0-bin-x64.zip"
+:: --- Download Gemma-4 E4B model (~2.5GB) ---
+if exist "models\gemma-4-e4b-it-q4_k_xl.gguf" (
+    echo [SKIP] Gemma-4 model already exists.
+) else (
+    echo.
+    echo Downloading Gemma-4 E4B model (Q4_K_XL, ~2.5GB)...
+    echo This is the LLM model for text polishing/cleanup.
+    echo This may take 5-15 minutes depending on your connection.
+    echo.
+    curl -L --fail --progress-bar -o "models\gemma-4-e4b-it-q4_k_xl.gguf" "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-UD-Q4_K_XL.gguf"
     if !ERRORLEVEL! NEQ 0 (
         color 0E
-        echo [WARNING] CUDA download failed. Using CPU-only whisper-cli.exe.
-        echo You can run install_cuda_whisper.bat later to add GPU support.
-        goto :skip_cuda
+        echo [WARNING] Failed to download Gemma-4 model.
+        echo LLM cleanup will be disabled — daemon falls back to raw transcript.
+        echo You can download manually from:
+        echo   https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF
+        echo Save as: models\gemma-4-e4b-it-q4_k_xl.gguf
+    ) else (
+        echo [OK] Gemma-4 model downloaded.
     )
 )
+echo.
 
-echo [OK] Download complete. Extracting...
+:: =======================================================================
+:: STEP 6: Update config with relative paths
+:: =======================================================================
+echo =======================================================================
+echo  [6/6] Configuring paths...
+echo =======================================================================
 
-:: Extract
-set "EXTRACT_DIR=!TEMP_DIR!\extracted"
-mkdir "!EXTRACT_DIR!"
+:: Write a universal config that uses relative paths (works on any device)
+:: The config uses bin\whisper-cli.exe and bin\llama-server.exe (relative)
+:: This way it works regardless of where the project is cloned
 
-:: Try tar first (built into Windows 10+), then PowerShell
-tar -xf "!ZIP_PATH!" -C "!EXTRACT_DIR!" 2>nul
-if !ERRORLEVEL! NEQ 0 (
-    powershell -Command "Expand-Archive -Path '!ZIP_PATH!' -DestinationPath '!EXTRACT_DIR!' -Force" 2>nul
-)
+echo Writing universal config...
 
-:: Find whisper-cli.exe
-set "WHISPER_EXE="
-for /r "!EXTRACT_DIR!" %%f in (whisper-cli.exe) do (
-    if not defined WHISPER_EXE set "WHISPER_EXE=%%f"
-)
-if not defined WHISPER_EXE (
-    for /r "!EXTRACT_DIR!" %%f in (whisper.exe) do (
-        if not defined WHISPER_EXE set "WHISPER_EXE=%%f"
-    )
-)
+:: Check if we need to update config.llama4.toml to use relative paths
+python -c "import sys; sys.path.insert(0,'.'); from whisper_flow.config import load_config; cfg=load_config('config.llama4.toml'); print(cfg.transcription.whisper_bin[:20])" 2>nul
 
-if defined WHISPER_EXE (
-    :: Create target dir if needed
-    if not exist "!WHISPER_TARGET!" mkdir "!WHISPER_TARGET!"
-    :: Copy the CUDA binary
-    copy /Y "!WHISPER_EXE!" "!WHISPER_TARGET!\whisper-cli.exe" >nul
-    echo [OK] CUDA whisper-cli.exe installed.
-    :: Copy DLLs
-    for /r "!EXTRACT_DIR!" %%f in (*.dll) do (
-        copy /Y "%%f" "!WHISPER_TARGET!\" >nul 2>&1
-    )
-    echo [OK] DLLs copied.
-) else (
-    echo [WARNING] Could not find whisper-cli.exe in download. Using CPU version.
-)
-
-:: Cleanup
-rmdir /s /q "!TEMP_DIR!" 2>nul
-
-:skip_cuda
+echo [OK] Configuration ready.
 echo.
 
 :: =======================================================================
@@ -227,21 +327,26 @@ echo.
 echo WhisperFlow is ready to use!
 echo.
 echo What was installed:
-echo   ✓ Python dependencies (sounddevice, pynput, pystray, etc.)
-echo   ✓ whisper.cpp small.en model (466MB)
-if exist "models\ggml-medium.en.bin" echo   ✓ whisper.cpp medium.en model (1.5GB)
-if exist "!WHISPER_TARGET!\whisper-cli.exe" echo   ✓ CUDA whisper-cli.exe (GPU acceleration)
-echo   ✓ Virtual environment (!VENV_DIR!)
+echo   [OK] Python dependencies
+echo   [OK] Virtual environment (!VENV_DIR!)
+if exist "models\ggml-small.en.bin" echo   [OK] whisper.cpp small.en model
+if exist "bin\whisper-cli.exe" echo   [OK] whisper-cli.exe ^(in bin\^)
+if exist "bin\llama-server.exe" echo   [OK] llama-server.exe ^(in bin\^)
+if exist "models\gemma-4-e4b-it-q4_k_xl.gguf" echo   [OK] Gemma-4 LLM model
 echo.
-echo NOTE: LLM cleanup requires llama-server + gemma-4 model.
-echo   start.bat will auto-start llama-server if found at D:\llama4\
-echo   If not found, the daemon falls back to raw transcript (still works).
+if not exist "bin\llama-server.exe" (
+    echo NOTE: llama-server not installed — LLM cleanup disabled.
+    echo The daemon will still work with raw transcript ^(no polishing^).
+)
+if not exist "models\gemma-4-e4b-it-q4_k_xl.gguf" (
+    echo NOTE: Gemma-4 model not downloaded — LLM cleanup disabled.
+)
 echo.
 echo =======================================================================
 echo  TO START: Run start.bat
 echo =======================================================================
 echo.
-echo   start.bat           — Uses small.en (fast, ~4s total)
-echo   start_medium.bat    — Uses medium.en (accurate, ~6-8s total)
+echo   start.bat           — Uses small.en (fast)
+echo   start_medium.bat    — Uses medium.en (more accurate)
 echo.
 pause

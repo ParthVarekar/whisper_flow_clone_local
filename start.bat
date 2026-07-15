@@ -79,7 +79,7 @@ echo [OK] Dependencies verified.
 :: -----------------------------------------------------------------------
 :: 4. Verify whisper.cpp model
 :: -----------------------------------------------------------------------
-set "WHISPER_MODEL=C:\Users\Parth\Desktop\whisper\models\ggml-small.en.bin"
+set "WHISPER_MODEL=models\ggml-small.en.bin"
 if not exist "!WHISPER_MODEL!" (
     color 0E
     echo [WARNING] ggml-small.en.bin not found. Run setup.bat to download it.
@@ -98,16 +98,36 @@ if !ERRORLEVEL! EQU 0 (
     echo [OK] llama-server is already running on port 8081.
 ) else (
     echo [STARTING] llama-server not running. Launching it now...
-    if exist "D:\llama4\llama-server.exe" (
-        start "llama-server" /min "D:\llama4\llama-server.exe" -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
-        echo [OK] llama-server started. Waiting for model to load ^(15s^)...
-        timeout /t 15 /nobreak >nul
-        echo [OK] Ready.
+    :: Try bin\llama-server.exe first (installed by setup.bat), then D:\llama4\
+    set "LLAMA_EXE="
+    if exist "bin\llama-server.exe" set "LLAMA_EXE=bin\llama-server.exe"
+    if exist "D:\llama4\llama-server.exe" set "LLAMA_EXE=D:\llama4\llama-server.exe"
+
+    if defined LLAMA_EXE (
+        :: Check if Gemma-4 model exists
+        set "LLAMA_MODEL="
+        if exist "models\gemma-4-e4b-it-q4_k_xl.gguf" set "LLAMA_MODEL=models\gemma-4-e4b-it-q4_k_xl.gguf"
+        if exist "D:\llama4\gemma-4-e4b-it-q4_k_xl.gguf" set "LLAMA_MODEL=D:\llama4\gemma-4-e4b-it-q4_k_xl.gguf"
+
+        if defined LLAMA_MODEL (
+            echo [START] !LLAMA_EXE! -m "!LLAMA_MODEL!" --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --reasoning off --reasoning-budget 0
+            start "llama-server" /min "!LLAMA_EXE!" -m "!LLAMA_MODEL!" --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --reasoning off --reasoning-budget 0
+            echo [OK] llama-server started. Waiting for model to load ^(15s^)...
+            timeout /t 15 /nobreak >nul
+            echo [OK] Ready.
+        ) else (
+            :: No model found — try -hf (HuggingFace auto-download)
+            echo [START] !LLAMA_EXE! -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+            start "llama-server" /min "!LLAMA_EXE!" -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+            echo [OK] llama-server started. Waiting for model to load ^(15s^)...
+            timeout /t 15 /nobreak >nul
+            echo [OK] Ready.
+        )
     ) else (
         color 0E
-        echo [WARNING] llama-server not found at D:\llama4\llama-server.exe
+        echo [WARNING] llama-server.exe not found.
+        echo   Run setup.bat to install it, or set path in config.llama4.toml
         echo   LLM cleanup disabled — daemon will use raw transcript.
-        echo   To enable: install llama.cpp and set path in config.llama4.toml
         echo.
         color 0A
     )
