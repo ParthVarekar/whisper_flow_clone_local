@@ -85,6 +85,24 @@ class TestBacktrack:
         assert "I am sorry for the delay." in result
 
 
+class TestSpokenFormatting:
+    def test_block_bold(self):
+        result = apply_smart_formatting("start bold this is bold end bold")
+        assert result == "**This is bold**."
+        
+    def test_word_bold(self):
+        result = apply_smart_formatting("this is a bold word bananas")
+        assert "**Bananas**" in result or "**bananas**" in result
+        
+    def test_phrase_italic(self):
+        result = apply_smart_formatting("please make this an italicize phrase hello world, and then stop")
+        assert "*hello world*" in result or "*Hello world*" in result
+        
+    def test_word_underline(self):
+        result = apply_smart_formatting("underline word check")
+        assert "<u>Check</u>" in result or "<u>check</u>" in result
+
+
 # ---------------------------------------------------------------------------
 # Repeated word / stutter removal
 # ---------------------------------------------------------------------------
