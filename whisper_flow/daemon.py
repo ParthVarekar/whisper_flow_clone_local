@@ -512,7 +512,6 @@ class Daemon:
             sys.stderr.write(f"[whisper-flow] error: {exc}\n")
             self._overlay.error(str(exc))
         finally:
-            self._overlay.hide()
             if self._tray:
                 self._tray.set_state("idle")
                 self._tray.update_tooltip("whisper-flow (idle) — Ctrl+Shift+Space to dictate")

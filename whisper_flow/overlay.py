@@ -1,9 +1,11 @@
 """Minimal translucent Apple-style floating overlay HUD for dictation state indication.
 
-Shows a borderless, always-on-top, semi-transparent glass card with:
+Pill-shaped, borderless, always-on-top window with:
+  - Transparent rounded corners (Windows transparentcolor style)
+  - Color-shifting border glow per phase
   - Phase animations: 5-bar equalizer (recording) -> Pop transition -> 4-dot shimmer (processing)
-  - Top status bar (Listening, Processing, ✨ Post-processed Result)
-  - Expanded text box section showing full live preview & post-processed text
+  - Asynchronous, non-blocking typewriter reveal and auto-hide
+  - Satisfying Windows audio chimes on state transitions
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ import sys
 import threading
 import time
 from typing import Callable, Optional
-
 
 _MSG_SHOW = "show"
 _MSG_HIDE = "hide"
@@ -91,7 +92,7 @@ class OverlayNotifier:
 
     def error(self, message: str) -> None:
         self._q.put((_MSG_STATUS, f"Error: {message}"))
-        threading.Timer(3.0, self.hide).start()
+        self.hide()
 
     def run(self, work: Callable[[], object]) -> object:
         return work()
@@ -111,42 +112,16 @@ class OverlayNotifier:
         self._q.put((_MSG_PROCESSING, "Processing & Polishing..."))
 
     def show_result(self, text: str) -> None:
-        """Show final polished output with a typewriter reveal effect.
+        """Show final polished output with a non-blocking typewriter reveal effect.
 
-        SYNCHRONOUS — blocks until the typewriter reveal is complete, then
-        sends the final RESULT (which triggers dynamic auto-hide). This
-        prevents the daemon's finally block from hiding the popup before
-        the typewriter animation finishes.
-
-        The text appears progressively (word-by-word) so the user sees
-        the polished output appear, making the polishing step feel responsive.
+        Unlike the original synchronous implementation, this does NOT block
+        the calling thread (daemon thread), so that dictation transitions
+        immediately and stays completely responsive.
         """
         if not text:
             return
         display = text if len(text) <= 500 else text[:495] + "..."
-
-        # Synchronous typewriter reveal — blocks the calling thread
-        import time as _time
-        words = display.split(" ")
-        chunk_size = 3  # 3 words per chunk for natural typing speed
-        for i in range(0, len(words), chunk_size):
-            partial = " ".join(words[:i + chunk_size])
-            if i + chunk_size < len(words):
-                partial += " ▌"  # cursor block
-            # Use PREVIEW during typing (doesn't trigger auto-hide)
-            self._q.put((_MSG_PREVIEW, partial))
-            _time.sleep(0.04)  # 40ms between chunks
-
-        # Send the final RESULT (switches to "done" state with green dot
-        # and triggers dynamic auto-hide based on text length)
         self._q.put((_MSG_RESULT, display))
-
-        # Wait for the dynamic auto-hide duration before returning, so the
-        # daemon's finally block (which calls hide()) doesn't kill the popup
-        # before the user has time to read the result.
-        word_count = len(display.split())
-        stay_ms = min(30000, int(5000 + word_count * 80))
-        _time.sleep(stay_ms / 1000.0)
 
     def set_mode(self, mode: str) -> None:
         self._selected_mode = mode
@@ -171,6 +146,33 @@ class OverlayNotifier:
             except Exception:  # noqa: BLE001
                 pass
 
+    # -- Chime Helpers -------------------------------------------------------
+
+    def _play_sound(self, sound_type: str) -> None:
+        """Play satisfying, non-blocking procedural chimes in a background thread."""
+        if sys.platform != "win32":
+            return
+
+        def _beep():
+            try:
+                import winsound
+                if sound_type == "start":
+                    # Upward notification tone
+                    winsound.Beep(880, 80)
+                    winsound.Beep(1100, 100)
+                elif sound_type == "processing":
+                    # Soft low confirmation
+                    winsound.Beep(700, 120)
+                elif sound_type == "error":
+                    # Low warning triple beep
+                    winsound.Beep(350, 100)
+                    time.sleep(0.05)
+                    winsound.Beep(350, 100)
+            except Exception:
+                pass
+
+        threading.Thread(target=_beep, daemon=True).start()
+
     # -- Tk implementation ---------------------------------------------------
 
     def _run_tk(self) -> None:
@@ -179,6 +181,18 @@ class OverlayNotifier:
         except ImportError:
             self._ready.set()
             return
+
+        # Setup Windows process-level DPI awareness so the UI is crisp and clean
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                shcore = ctypes.windll.shcore
+                shcore.SetProcessDpiAwareness(2)  # Process Per Monitor DPI Aware
+            except Exception:
+                try:
+                    ctypes.windll.user32.SetProcessDPIAware()
+                except Exception:
+                    pass
 
         root = tk.Tk()
         root.withdraw()
@@ -189,7 +203,15 @@ class OverlayNotifier:
         except Exception:  # noqa: BLE001
             pass
 
-        # On Windows, set WS_EX_NOACTIVATE so the floating HUD never steals focus from active apps/browser tabs
+        # Use Windows-specific transparent color trick for rounded corners
+        trans_color = "#000001"
+        root.configure(bg=trans_color)
+        try:
+            root.attributes("-transparentcolor", trans_color)
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Set WS_EX_NOACTIVATE so focus is never stolen from foreground apps
         if sys.platform == "win32":
             try:
                 import ctypes
@@ -198,24 +220,26 @@ class OverlayNotifier:
                 GWL_EXSTYLE = -20
                 WS_EX_NOACTIVATE = 0x08000000
                 WS_EX_TOPMOST = 0x00000008
+                WS_EX_LAYERED = 0x00080000
                 ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE | WS_EX_TOPMOST)
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_LAYERED)
             except Exception:  # noqa: BLE001
                 pass
 
-        # Dark macOS Glass aesthetic
         bg_color = "#0b0d17"
-        border_color = "#2a2e45"
-        root.configure(bg=border_color)
+        border_color_var = ["#38bdf8"]  # Mutable reference to update dynamically
 
-        outer_frame = tk.Frame(root, bg=border_color, padx=1, pady=1)
-        outer_frame.pack(fill=tk.BOTH, expand=True)
+        # Setup outer canvas container
+        canvas = tk.Canvas(root, bg=trans_color, highlightthickness=0)
+        canvas.pack(fill=tk.BOTH, expand=True)
 
-        main_frame = tk.Frame(outer_frame, bg=bg_color, padx=16, pady=12)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Place the inner layout frame on top of the capsule background
+        inner_frame = tk.Frame(root, bg=bg_color)
+        # Center inner frame in canvas
+        inner_frame_win = canvas.create_window(0, 0, window=inner_frame, anchor="center")
 
-        # Top status bar row
-        top_row = tk.Frame(main_frame, bg=bg_color)
+        # Top status bar row inside the frame
+        top_row = tk.Frame(inner_frame, bg=bg_color)
         top_row.pack(fill=tk.X, expand=False, side=tk.TOP)
 
         # Status label
@@ -230,7 +254,7 @@ class OverlayNotifier:
         )
         status_lbl.pack(side=tk.LEFT, padx=(0, 10))
 
-        # Mic indicator dot
+        # Mic indicator dot canvas
         dot = tk.Canvas(top_row, width=14, height=14, bg=bg_color, highlightthickness=0)
         dot.pack(side=tk.LEFT, padx=(0, 8))
         dot_id = dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
@@ -239,15 +263,15 @@ class OverlayNotifier:
         meter_canvas = tk.Canvas(top_row, width=90, height=14, bg=bg_color, highlightthickness=0)
         meter_canvas.pack(side=tk.RIGHT)
 
-        # Preview / Result text section (multi-line wrapped text box)
+        # Content text label
         content_var = tk.StringVar(value="")
         content_lbl = tk.Label(
-            main_frame,
+            inner_frame,
             textvariable=content_var,
             fg="#e2e8f0",
             bg=bg_color,
             font=("Segoe UI", 10),
-            wraplength=530,
+            wraplength=520,
             justify=tk.LEFT,
             anchor="nw",
         )
@@ -256,51 +280,109 @@ class OverlayNotifier:
         self._root = root
         self._ready.set()
 
-        # Dynamic popup sizing — resize based on content length
-        def _resize_for_content(text: str):
-            """Resize the popup to fit the content dynamically.
+        # Canvas capsule rendering
+        def _draw_capsule_bg(w, h, radius, border_color):
+            canvas.delete("bg_shape")
+            r = radius
+            x0, y0 = 1, 1
+            x1, y1 = w - 1, h - 1
 
-            Width: 560px (stable)
-            Height: 130px base, +20px per line, up to 50% of screen height
-            Called on every PREVIEW and RESULT message so the popup grows
-            as text is added during the typewriter reveal.
-            """
+            # Filled corner circles
+            canvas.create_oval(x0, y0, x0 + r*2, y0 + r*2, fill=bg_color, outline="", tags="bg_shape")
+            canvas.create_oval(x1 - r*2, y0, x1, y0 + r*2, fill=bg_color, outline="", tags="bg_shape")
+            canvas.create_oval(x0, y1 - r*2, x0 + r*2, y1, fill=bg_color, outline="", tags="bg_shape")
+            canvas.create_oval(x1 - r*2, y1 - r*2, x1, y1, fill=bg_color, outline="", tags="bg_shape")
+
+            # Center filled rectangles
+            canvas.create_rectangle(x0 + r, y0, x1 - r, y1, fill=bg_color, outline="", tags="bg_shape")
+            canvas.create_rectangle(x0, y0 + r, x1, y1 - r, fill=bg_color, outline="", tags="bg_shape")
+
+            # Border arcs
+            canvas.create_arc(x0, y0, x0 + r*2, y0 + r*2, start=90, extent=90, style=tk.ARC, outline=border_color, width=1.5, tags="bg_shape")
+            canvas.create_arc(x1 - r*2, y0, x1, y0 + r*2, start=0, extent=90, style=tk.ARC, outline=border_color, width=1.5, tags="bg_shape")
+            canvas.create_arc(x0, y1 - r*2, x0 + r*2, y1, start=180, extent=90, style=tk.ARC, outline=border_color, width=1.5, tags="bg_shape")
+            canvas.create_arc(x1 - r*2, y1 - r*2, x1, y1, start=270, extent=90, style=tk.ARC, outline=border_color, width=1.5, tags="bg_shape")
+
+            # Border lines
+            canvas.create_line(x0 + r, y0, x1 - r, y0, fill=border_color, width=1.5, tags="bg_shape")
+            canvas.create_line(x0 + r, y1, x1 - r, y1, fill=border_color, width=1.5, tags="bg_shape")
+            canvas.create_line(x0, y0 + r, x0, y1 - r, fill=border_color, width=1.5, tags="bg_shape")
+            canvas.create_line(x1, y0 + r, x1, y1 - r, fill=border_color, width=1.5, tags="bg_shape")
+
+        # Dynamic resizing of capsule
+        def _resize_for_content(text: str):
             screen_h = root.winfo_screenheight()
-            max_h = screen_h // 2  # 50% of screen height
+            max_h = screen_h // 2
+            
             if not text:
-                w, h = 560, 130
+                w, h = 560, 110
             else:
-                # Estimate lines based on wraplength and text length
-                wrap = 530
-                chars_per_line = wrap // 8  # ~8px per char at 10pt
-                # Count explicit newlines (list items) + wrapped lines
+                wrap = 520
+                chars_per_line = wrap // 8
                 lines = 0
                 for line in text.split("\n"):
                     line_len = max(1, len(line))
                     lines += max(1, (line_len + chars_per_line - 1) // chars_per_line)
                 lines = max(1, lines)
-                w = 560  # keep width stable
-                h = min(max_h, max(130, 70 + lines * 20))
+                w = 560
+                h = min(max_h, max(110, 60 + lines * 20))
+
             sw = root.winfo_screenwidth()
             x = (sw - w) // 2
             y = screen_h - h - 70
+            
             root.geometry(f"{w}x{h}+{x}+{y}")
-            # Force the window manager to apply the resize immediately
+            canvas.config(width=w, height=h)
+            canvas.coords(inner_frame_win, w // 2, h // 2)
+            canvas.itemconfigure(inner_frame_win, width=w-32, height=h-24)
+            
+            _draw_capsule_bg(w, h, 20, border_color_var[0])
+
             try:
                 root.update_idletasks()
             except Exception:  # noqa: BLE001
                 pass
 
-        def _position():
-            _resize_for_content("")
+        # Interactive Drag support
+        def start_drag(event):
+            root.x = event.x
+            root.y = event.y
+            
+        def drag(event):
+            deltax = event.x - root.x
+            deltay = event.y - root.y
+            x = root.winfo_x() + deltax
+            y = root.winfo_y() + deltay
+            root.geometry(f"+{x}+{y}")
 
-        _position()
+        canvas.bind("<Button-1>", start_drag)
+        canvas.bind("<B1-Motion>", drag)
 
-        # State variables for animation loop
-        phase = ["idle"]  # "recording", "pop", "processing", "done"
+        _resize_for_content("")
+
+        # Animation states
+        phase = ["idle"]
         pop_time = [0.0]
         anim_step = [0]
         meter_level = [0.0]
+
+        # Scheduled task holders
+        typewriter_task = [None]
+        auto_hide_task = [None]
+
+        def _cancel_scheduled_tasks():
+            if typewriter_task[0] is not None:
+                try:
+                    root.after_cancel(typewriter_task[0])
+                except Exception:  # noqa: BLE001
+                    pass
+                typewriter_task[0] = None
+            if auto_hide_task[0] is not None:
+                try:
+                    root.after_cancel(auto_hide_task[0])
+                except Exception:  # noqa: BLE001
+                    pass
+                auto_hide_task[0] = None
 
         def _render_frame():
             now = time.monotonic()
@@ -308,7 +390,7 @@ class OverlayNotifier:
             anim_step[0] += 1
             step = anim_step[0]
 
-            # --- 1. POP TRANSITION ANIMATION ---
+            # --- POP TRANSITION ---
             if current_phase == "pop":
                 elapsed = now - pop_time[0]
                 if elapsed < 0.15:
@@ -319,7 +401,7 @@ class OverlayNotifier:
                     dot.delete("all")
                     dot.create_oval(2, 2, 12, 12, fill="#a855f7", outline="")
 
-            # --- 2. RECORDING PHASE: Equalizer Waveform & Pulse Dot ---
+            # --- RECORDING EQUALIZER WAVE ---
             elif current_phase == "recording":
                 pulse_color = "#ef4444" if (step // 8) % 2 == 0 else "#f87171"
                 dot.itemconfig(dot_id, fill=pulse_color)
@@ -345,7 +427,7 @@ class OverlayNotifier:
                     color = colors[i % len(colors)] if amp > 0.05 else "#4b5563"
                     meter_canvas.create_rectangle(x0, y0, x0 + bar_width, y1, fill=color, outline="")
 
-            # --- 3. PROCESSING PHASE: Bouncing Purple/Cyan Wave Shimmer ---
+            # --- PROCESSING SHIMMER ---
             elif current_phase == "processing":
                 dot.itemconfig(dot_id, fill="#a855f7")
                 meter_canvas.delete("all")
@@ -372,64 +454,94 @@ class OverlayNotifier:
 
             root.after(30, _render_frame)
 
+        # Async non-blocking typewriter routine
+        def _run_async_typewriter(text: str):
+            words = text.split(" ")
+            chunk_size = 3
+
+            def reveal_chunk(index):
+                partial = " ".join(words[:index + chunk_size])
+                if index + chunk_size < len(words):
+                    partial += " ▌"
+                content_var.set(f'"{partial}"')
+                _resize_for_content(partial)
+
+                if index + chunk_size < len(words):
+                    typewriter_task[0] = root.after(40, reveal_chunk, index + chunk_size)
+                else:
+                    content_var.set(f'"{text}"')
+                    _resize_for_content(text)
+                    typewriter_task[0] = None
+                    
+                    # Schedule non-blocking auto-hide
+                    word_count = len(words)
+                    hide_delay_ms = min(30000, int(5000 + word_count * 80))
+                    auto_hide_task[0] = root.after(hide_delay_ms, lambda: self.hide() if phase[0] == "done" else None)
+
+            reveal_chunk(0)
+
+        # Queue poller
         def _poll():
             try:
                 while True:
                     msg_type, data = self._q.get_nowait()
                     if msg_type == _MSG_SHOW:
+                        _cancel_scheduled_tasks()
                         status_var.set(str(data) or "Listening...")
                         status_lbl.configure(fg="#38bdf8")
                         content_var.set("")
                         phase[0] = "recording"
+                        border_color_var[0] = "#38bdf8"
                         dot.delete("all")
-                        dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
-                        _position()
+                        dot_id = dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
+                        self._play_sound("start")
+                        _resize_for_content("")
                         root.deiconify()
                         if sys.platform == "win32":
                             try:
                                 import ctypes
-                                user32 = ctypes.windll.user32
-                                hwnd = user32.GetAncestor(root.winfo_id(), 2) or root.winfo_id()
-                                user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
-                                user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
+                                hwnd = ctypes.windll.user32.GetAncestor(root.winfo_id(), 2) or root.winfo_id()
+                                ctypes.windll.user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+                                ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
                             except Exception:  # noqa: BLE001
                                 pass
                     elif msg_type == _MSG_HIDE:
+                        _cancel_scheduled_tasks()
                         phase[0] = "idle"
                         root.withdraw()
                         meter_level[0] = 0.0
                         content_var.set("")
                         _resize_for_content("")
                     elif msg_type == _MSG_PREVIEW:
-                        content_var.set(f"🎙️ \"{data}\"")
-                        _resize_for_content(str(data))
+                        if phase[0] == "recording":
+                            content_var.set(f"🎙️ \"{data}\"")
+                            _resize_for_content(str(data))
                     elif msg_type == _MSG_STATUS:
                         status_var.set(str(data))
+                        if str(data).startswith("Error:"):
+                            self._play_sound("error")
+                            border_color_var[0] = "#ef4444"
+                            status_lbl.configure(fg="#ef4444")
+                            _resize_for_content(content_var.get())
                     elif msg_type == _MSG_PROCESSING:
+                        _cancel_scheduled_tasks()
                         status_var.set(str(data) or "Processing...")
                         status_lbl.configure(fg="#c084fc")
+                        border_color_var[0] = "#a855f7"
                         phase[0] = "pop"
+                        self._play_sound("processing")
                         pop_time[0] = time.monotonic()
+                        _resize_for_content("")
                     elif msg_type == _MSG_RESULT:
+                        _cancel_scheduled_tasks()
                         status_var.set("✨ Post-processed Output")
                         status_lbl.configure(fg="#4ade80")
-                        content_var.set(f"\"{data}\"")
-                        _resize_for_content(str(data))
+                        border_color_var[0] = "#22c55e"
                         phase[0] = "done"
                         dot.delete("all")
                         dot.create_oval(2, 2, 12, 12, fill="#22c55e", outline="")
-                        # Dynamic auto-hide: longer text stays longer.
-                        # Formula: 5s base + 0.08s per word, capped at 30s max.
-                        # Examples:
-                        #   10 words → 5.8s
-                        #   30 words → 7.4s
-                        #   50 words → 9s
-                        #   100 words → 13s
-                        #   200+ words → 21s
-                        #   300+ words → 30s (max)
-                        word_count = len(str(data).split())
-                        hide_delay_ms = min(30000, int(5000 + word_count * 80))
-                        root.after(hide_delay_ms, lambda: self.hide() if phase[0] == "done" else None)
+                        # Trigger async typewriter effect
+                        _run_async_typewriter(str(data))
                     elif msg_type == _MSG_AMPLITUDE:
                         rms = float(data)
                         meter_level[0] = max(rms, meter_level[0] * 0.85)
