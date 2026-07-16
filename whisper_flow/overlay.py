@@ -216,13 +216,13 @@ class OverlayNotifier:
             try:
                 import ctypes
                 user32 = ctypes.windll.user32
+                root.update()  # Force HWND creation in OS before calling winfo_id
                 hwnd = user32.GetAncestor(root.winfo_id(), 2) or root.winfo_id()
                 GWL_EXSTYLE = -20
                 WS_EX_NOACTIVATE = 0x08000000
-                WS_EX_TOPMOST = 0x00000008
-                WS_EX_LAYERED = 0x00080000
                 ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_LAYERED)
+                # Apply ONLY WS_EX_NOACTIVATE to avoid corrupting layered/alpha/transparency states managed by Tkinter
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -385,6 +385,7 @@ class OverlayNotifier:
                 auto_hide_task[0] = None
 
         def _render_frame():
+            nonlocal dot_id
             now = time.monotonic()
             current_phase = phase[0]
             anim_step[0] += 1
@@ -482,72 +483,77 @@ class OverlayNotifier:
 
         # Queue poller
         def _poll():
+            nonlocal dot_id
             try:
-                while True:
-                    msg_type, data = self._q.get_nowait()
-                    if msg_type == _MSG_SHOW:
-                        _cancel_scheduled_tasks()
-                        status_var.set(str(data) or "Listening...")
-                        status_lbl.configure(fg="#38bdf8")
-                        content_var.set("")
-                        phase[0] = "recording"
-                        border_color_var[0] = "#38bdf8"
-                        dot.delete("all")
-                        dot_id = dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
-                        self._play_sound("start")
-                        _resize_for_content("")
-                        root.deiconify()
-                        if sys.platform == "win32":
-                            try:
-                                import ctypes
-                                hwnd = ctypes.windll.user32.GetAncestor(root.winfo_id(), 2) or root.winfo_id()
-                                ctypes.windll.user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
-                                ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
-                            except Exception:  # noqa: BLE001
-                                pass
-                    elif msg_type == _MSG_HIDE:
-                        _cancel_scheduled_tasks()
-                        phase[0] = "idle"
-                        root.withdraw()
-                        meter_level[0] = 0.0
-                        content_var.set("")
-                        _resize_for_content("")
-                    elif msg_type == _MSG_PREVIEW:
-                        if phase[0] == "recording":
-                            content_var.set(f"🎙️ \"{data}\"")
-                            _resize_for_content(str(data))
-                    elif msg_type == _MSG_STATUS:
-                        status_var.set(str(data))
-                        if str(data).startswith("Error:"):
-                            self._play_sound("error")
-                            border_color_var[0] = "#ef4444"
-                            status_lbl.configure(fg="#ef4444")
-                            _resize_for_content(content_var.get())
-                    elif msg_type == _MSG_PROCESSING:
-                        _cancel_scheduled_tasks()
-                        status_var.set(str(data) or "Processing...")
-                        status_lbl.configure(fg="#c084fc")
-                        border_color_var[0] = "#a855f7"
-                        phase[0] = "pop"
-                        self._play_sound("processing")
-                        pop_time[0] = time.monotonic()
-                        _resize_for_content("")
-                    elif msg_type == _MSG_RESULT:
-                        _cancel_scheduled_tasks()
-                        status_var.set("✨ Post-processed Output")
-                        status_lbl.configure(fg="#4ade80")
-                        border_color_var[0] = "#22c55e"
-                        phase[0] = "done"
-                        dot.delete("all")
-                        dot.create_oval(2, 2, 12, 12, fill="#22c55e", outline="")
-                        # Trigger async typewriter effect
-                        _run_async_typewriter(str(data))
-                    elif msg_type == _MSG_AMPLITUDE:
-                        rms = float(data)
-                        meter_level[0] = max(rms, meter_level[0] * 0.85)
-            except queue.Empty:
-                pass
-            root.after(40, _poll)
+                try:
+                    while True:
+                        msg_type, data = self._q.get_nowait()
+                        if msg_type == _MSG_SHOW:
+                            _cancel_scheduled_tasks()
+                            status_var.set(str(data) or "Listening...")
+                            status_lbl.configure(fg="#38bdf8")
+                            content_var.set("")
+                            phase[0] = "recording"
+                            border_color_var[0] = "#38bdf8"
+                            dot.delete("all")
+                            dot_id = dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
+                            self._play_sound("start")
+                            _resize_for_content("")
+                            root.deiconify()
+                            if sys.platform == "win32":
+                                try:
+                                    import ctypes
+                                    hwnd = ctypes.windll.user32.GetAncestor(root.winfo_id(), 2) or root.winfo_id()
+                                    ctypes.windll.user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+                                    ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
+                                except Exception:  # noqa: BLE001
+                                    pass
+                        elif msg_type == _MSG_HIDE:
+                            _cancel_scheduled_tasks()
+                            phase[0] = "idle"
+                            root.withdraw()
+                            meter_level[0] = 0.0
+                            content_var.set("")
+                            _resize_for_content("")
+                        elif msg_type == _MSG_PREVIEW:
+                            if phase[0] == "recording":
+                                content_var.set(f"🎙️ \"{data}\"")
+                                _resize_for_content(str(data))
+                        elif msg_type == _MSG_STATUS:
+                            status_var.set(str(data))
+                            if str(data).startswith("Error:"):
+                                self._play_sound("error")
+                                border_color_var[0] = "#ef4444"
+                                status_lbl.configure(fg="#ef4444")
+                                _resize_for_content(content_var.get())
+                        elif msg_type == _MSG_PROCESSING:
+                            _cancel_scheduled_tasks()
+                            status_var.set(str(data) or "Processing...")
+                            status_lbl.configure(fg="#c084fc")
+                            border_color_var[0] = "#a855f7"
+                            phase[0] = "pop"
+                            self._play_sound("processing")
+                            pop_time[0] = time.monotonic()
+                            _resize_for_content("")
+                        elif msg_type == _MSG_RESULT:
+                            _cancel_scheduled_tasks()
+                            status_var.set("✨ Post-processed Output")
+                            status_lbl.configure(fg="#4ade80")
+                            border_color_var[0] = "#22c55e"
+                            phase[0] = "done"
+                            dot.delete("all")
+                            dot_id = dot.create_oval(2, 2, 12, 12, fill="#22c55e", outline="")
+                            # Trigger async typewriter effect
+                            _run_async_typewriter(str(data))
+                        elif msg_type == _MSG_AMPLITUDE:
+                            rms = float(data)
+                            meter_level[0] = max(rms, meter_level[0] * 0.85)
+                except queue.Empty:
+                    pass
+            except Exception as e:
+                sys.stderr.write(f"[whisper-flow] UI poll error: {e}\n")
+            finally:
+                root.after(40, _poll)
 
         root.after(30, _render_frame)
         root.after(40, _poll)

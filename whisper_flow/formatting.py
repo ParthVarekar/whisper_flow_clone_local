@@ -337,12 +337,41 @@ def _apply_backtrack(text: str) -> str:
     # multiple backtrack markers in sequence.
     sentences = re.split(r"([.!?]\s+)", text)
     rebuilt: list[str] = []
+    
     for part in sentences:
         lowered = part.lower()
-        marker = next((m for m in _BACKTRACK_MARKERS if m in lowered), "")
-        if marker:
-            idx = lowered.find(marker)
-            suffix = part[idx + len(marker):].strip(" ,")
+        earliest_idx = -1
+        best_marker = ""
+        
+        for marker in _BACKTRACK_MARKERS:
+            start_pos = 0
+            while True:
+                idx = lowered.find(marker, start_pos)
+                if idx == -1:
+                    break
+                
+                # Check word boundaries
+                is_word_start = (idx == 0 or not lowered[idx - 1].isalnum())
+                is_word_end = (idx + len(marker) == len(lowered) or not lowered[idx + len(marker)].isalnum())
+                
+                if is_word_start and is_word_end:
+                    # Check if preceded only by clause/sentence boundary punctuation
+                    pre = part[:idx].rstrip()
+                    is_valid = False
+                    if not pre:
+                        is_valid = True
+                    elif pre[-1] in {",", ";", "—", "-", ".", "!", "?"}:
+                        is_valid = True
+                    
+                    if is_valid:
+                        if earliest_idx == -1 or idx < earliest_idx:
+                            earliest_idx = idx
+                            best_marker = marker
+                            
+                start_pos = idx + 1
+                
+        if earliest_idx != -1:
+            suffix = part[earliest_idx + len(best_marker):].strip(" ,")
             # Remove ONLY the immediately preceding sentence + its separator.
             # Pop the separator first, then the sentence.
             if rebuilt:
@@ -358,7 +387,9 @@ def _apply_backtrack(text: str) -> str:
             if len(suffix.split()) >= 1:
                 rebuilt.append(suffix)
             continue
+            
         rebuilt.append(part)
+        
     return "".join(rebuilt)
 
 

@@ -72,6 +72,18 @@ class TestBacktrack:
         assert "John" not in result
         assert "Jane" in result
 
+    def test_actually_mid_sentence_preserved(self):
+        result = apply_smart_formatting(
+            "This is actually a very good test."
+        )
+        assert "This is actually a very good test." in result
+
+    def test_sorry_mid_sentence_preserved(self):
+        result = apply_smart_formatting(
+            "I am sorry for the delay."
+        )
+        assert "I am sorry for the delay." in result
+
 
 # ---------------------------------------------------------------------------
 # Repeated word / stutter removal
