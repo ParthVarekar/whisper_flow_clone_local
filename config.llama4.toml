@@ -1,11 +1,27 @@
 # WhisperFlow configuration — whisper.cpp small.en + gemma-4 LLM cleanup
 #
-# Uses RELATIVE paths so it works on any device after running setup.bat.
-# setup.bat downloads: bin\whisper-cli.exe, bin\llama-server.exe,
-#                      models\ggml-small.en.bin, models\gemma-4-e4b-it-q4_k_xl.gguf
+# ARCHITECTURE (speed optimization, July 2026):
+#   ASR backend  = whisper.cpp small.en (244M, ~1.5s for 30s audio)
+#   LLM cleanup  = gemma-4 E4B via llama-server (auto-started by start.bat)
+#   Target       = <5s total (ASR + LLM + formatting)
+#
+# WHY small.en INSTEAD OF Qwen3-ASR?
+#   Qwen3-ASR (1.7B) takes ~33s for 27s audio — too slow.
+#   whisper.cpp small.en (244M) takes ~1.5s — 22x faster.
+#   The LLM (gemma-4) corrects ASR errors using context, so the slightly
+#   lower raw accuracy of small.en is compensated by LLM cleanup.
+#
+# ROLLBACK:
+#   git checkout savepoint-qwen3-working -- config.llama4.toml whisper_flow/daemon.py
+#
+# TO SWITCH TO medium.en (more accurate, ~3-5s ASR):
+#   Change model line below to: ggml-medium.en.bin
+#
+# TO SWITCH BACK TO Qwen3-ASR:
+#   Change backend to "qwen3_asr" and uncomment the qwen3_asr lines
 #
 # Start the LLM server with (auto-started by start.bat):
-# bin\llama-server.exe -m models\gemma-4-e4b-it-q4_k_xl.gguf --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --reasoning off --reasoning-budget 0
+# D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
 
 mode = "auto"
 verbose = false
@@ -16,21 +32,24 @@ command_hotkey = "ctrl+shift+t"
 dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API", "Qwen3-ASR (kwen three)", "Qwen3 (kwen three)", "Moonshine", "crispasr", "CrispASR"]
 
 [transcription]
+# Primary backend: whisper.cpp with small.en (fast, ~1.5s for 30s audio)
 backend = "whisper_cpp"
-whisper_bin = 'bin\whisper-cli.exe'
-model = 'models\ggml-small.en.bin'
+whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
+model = 'C:\Users\Parth\Desktop\whisper\models\ggml-small.en.bin'
 language = "en"
 threads = 8
 flash_attention = true
 
 # Alternative: medium.en (more accurate, ~3-5s ASR)
-# model = 'models\ggml-medium.en.bin'
+# To use: uncomment the line below and comment out the small.en line above
+# model = 'C:\Users\Parth\Desktop\whisper\models\ggml-medium.en.bin'
 
 # Fallback backend: Qwen3-ASR (most accurate, ~33s ASR — too slow for daily use)
+# To use: uncomment these lines and comment out the whisper_cpp lines above
 # backend = "qwen3_asr"
-# qwen3_asr_bin = 'third_party\crispasr\crispasr.exe'
-# qwen3_asr_model = 'models\qwen3-asr-1.7b-q4_k.gguf'
-# qwen3_asr_mmproj = 'models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
+# qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
+# qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
+# qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
 
 [audio]
 mic_backend = "sounddevice"
@@ -41,9 +60,9 @@ stream_max_s = 12
 
 [llm]
 mode = "server"
-llama_server_bin = 'bin\llama-server.exe'
-llama_cli_bin = 'bin\llama-cli.exe'
-model = 'models\gemma-4-e4b-it-q4_k_xl.gguf'
+llama_server_bin = 'D:\llama4\llama-server.exe'
+llama_cli_bin = 'D:\llama4\llama-cli.exe'
+model = 'C:\Users\Parth\.cache\huggingface\hub\models--unsloth--gemma-4-E4B-it-GGUF\snapshots\e1d90e5fb9f61d8dc71ef016580784a054e5c787\gemma-4-E4B-it-UD-Q4_K_XL.gguf'
 host = "127.0.0.1"
 port = 8081
 n_ctx = 2048

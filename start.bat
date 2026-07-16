@@ -1,27 +1,8 @@
 @echo off
-setlocal enabledelayedexpansion
 title WhisperFlow - Voice Dictation Launcher
 color 0A
 cd /d "%~dp0"
 cls
-
-:: =======================================================================
-:: First-run check: if setup hasn't been done, tell the user
-:: =======================================================================
-if not exist "models\ggml-small.en.bin" (
-    if not exist "bin\whisper-cli.exe" (
-        echo =======================================================================
-        echo   FIRST RUN DETECTED
-        echo =======================================================================
-        echo.
-        echo   Please run setup.bat first to download models and binaries.
-        echo   After setup completes, run start.bat again.
-        echo.
-        pause
-        exit /b 0
-    )
-)
-
 echo =======================================================================
 echo               WHISPER FLOW - ONE-CLICK LAUNCHER
 echo            whisper.cpp (small.en) + LLM cleanup (gemma-4)
@@ -32,7 +13,7 @@ echo.
 :: 1. Check Python is available
 :: -----------------------------------------------------------------------
 where python >nul 2>&1
-if !ERRORLEVEL! NEQ 0 (
+if %ERRORLEVEL% NEQ 0 (
     color 0C
     echo [ERROR] Python was not found in PATH!
     echo Please install Python 3.10+ and add it to your System PATH.
@@ -42,92 +23,127 @@ if !ERRORLEVEL! NEQ 0 (
 )
 
 :: -----------------------------------------------------------------------
-:: 2. Activate virtual environment
+:: 2. Activate virtual environment if one exists (recommended)
 :: -----------------------------------------------------------------------
 set "VENV_DIR="
 if exist ".qa-venv\Scripts\activate.bat" set "VENV_DIR=.qa-venv"
 if exist ".venv\Scripts\activate.bat" set "VENV_DIR=.venv"
 
 if defined VENV_DIR (
-    echo [OK] Activating virtual environment: !VENV_DIR!
-    call "!VENV_DIR!\Scripts\activate.bat"
+    echo [OK] Activating virtual environment: %VENV_DIR%
+    call "%VENV_DIR%\Scripts\activate.bat"
 ) else (
     echo [INFO] No virtual environment found. Using system Python.
+    echo        (recommended: create one with: python -m venv .venv)
 )
 
 :: -----------------------------------------------------------------------
-:: 3. Quick dependency check (auto-install if missing)
+:: 3. Ensure required Python packages are installed
 :: -----------------------------------------------------------------------
-echo [CHECK] Verifying dependencies...
+echo [CHECK] Verifying Python dependencies...
 
-python -c "import sounddevice" >nul 2>&1 || (echo [INSTALL] sounddevice... && python -m pip install sounddevice -q)
-python -c "import pynput" >nul 2>&1 || (echo [INSTALL] pynput... && python -m pip install pynput -q)
-python -c "import pystray" >nul 2>&1 || (echo [INSTALL] pystray Pillow... && python -m pip install pystray Pillow -q)
-python -c "import numpy" >nul 2>&1 || (echo [INSTALL] numpy... && python -m pip install numpy -q)
-python -c "import pyperclip" >nul 2>&1 || (echo [INSTALL] pyperclip... && python -m pip install pyperclip -q)
-python -c "import tomllib" >nul 2>&1 || (python -c "import tomli" >nul 2>&1 || (echo [INSTALL] tomli... && python -m pip install tomli -q))
+python -c "import sounddevice" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [INSTALL] Installing sounddevice ^(mic capture^)...
+    python -m pip install sounddevice
+)
 
-echo [OK] Dependencies verified.
+python -c "import pynput" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [INSTALL] Installing pynput ^(global hotkeys^)...
+    python -m pip install pynput
+)
+
+python -c "import pystray" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [INSTALL] Installing pystray + Pillow ^(system tray^)...
+    python -m pip install pystray Pillow
+)
+
+python -c "import numpy" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [INSTALL] Installing numpy...
+    python -m pip install numpy
+)
+
+python -c "import pyperclip" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [INSTALL] Installing pyperclip ^(clipboard fallback^)...
+    python -m pip install pyperclip
+)
+
+python -c "import tomllib" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    python -c "import tomli" >nul 2>&1
+    if %ERRORLEVEL% NEQ 0 (
+        echo [INSTALL] Installing tomli ^(TOML config for Python ^< 3.11^)...
+        python -m pip install tomli
+    )
+)
 
 :: -----------------------------------------------------------------------
-:: 4. Verify whisper.cpp model
+:: 4. Verify whisper.cpp binary and model files exist
 :: -----------------------------------------------------------------------
-set "WHISPER_MODEL=models\ggml-small.en.bin"
-if not exist "!WHISPER_MODEL!" (
+echo [CHECK] Verifying whisper.cpp installation...
+
+set "WHISPER_BIN=C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe"
+set "WHISPER_MODEL_SMALL=C:\Users\Parth\Desktop\whisper\models\ggml-small.en.bin"
+set "WHISPER_MODEL_MEDIUM=C:\Users\Parth\Desktop\whisper\models\ggml-medium.en.bin"
+
+set "ALL_FOUND=1"
+
+if not exist "%WHISPER_BIN%" (
     color 0E
-    echo [WARNING] ggml-small.en.bin not found. Run setup.bat to download it.
+    echo [WARNING] whisper-cli.exe not found at:
+    echo   %WHISPER_BIN%
     echo.
+    set "ALL_FOUND=0"
+    color 0A
+)
+
+if not exist "%WHISPER_MODEL_SMALL%" (
+    color 0E
+    echo [WARNING] ggml-small.en.bin not found at:
+    echo   %WHISPER_MODEL_SMALL%
+    echo   Run download_models.bat to download it.
+    echo.
+    set "ALL_FOUND=0"
     color 0A
 ) else (
-    echo [OK] Model found: small.en
+    echo [OK] ggml-small.en.bin found.
+)
+
+if exist "%WHISPER_MODEL_MEDIUM%" (
+    echo [OK] ggml-medium.en.bin found ^(available as alternative^).
 )
 
 :: -----------------------------------------------------------------------
-:: 5. Auto-start llama-server (for LLM cleanup)
+:: 5. Check if llama-server is running (for LLM cleanup); auto-start if not
 :: -----------------------------------------------------------------------
 echo [CHECK] Checking for llama-server on port 8081...
 powershell -Command "$s = New-Object System.Net.Sockets.TcpClient; try { $s.Connect('127.0.0.1', 8081); exit 0 } catch { exit 1 }" >nul 2>&1
-if !ERRORLEVEL! EQU 0 (
-    echo [OK] llama-server is already running on port 8081.
+if %ERRORLEVEL% EQU 0 (
+    echo [OK] llama-server is already running on port 8081. LLM cleanup active.
 ) else (
     echo [STARTING] llama-server not running. Launching it now...
-    :: Try bin\llama-server.exe first (installed by setup.bat), then D:\llama4\
-    set "LLAMA_EXE="
-    if exist "bin\llama-server.exe" set "LLAMA_EXE=bin\llama-server.exe"
-    if exist "D:\llama4\llama-server.exe" set "LLAMA_EXE=D:\llama4\llama-server.exe"
-
-    if defined LLAMA_EXE (
-        :: Check if Gemma-4 model exists
-        set "LLAMA_MODEL="
-        if exist "models\gemma-4-e4b-it-q4_k_xl.gguf" set "LLAMA_MODEL=models\gemma-4-e4b-it-q4_k_xl.gguf"
-        if exist "D:\llama4\gemma-4-e4b-it-q4_k_xl.gguf" set "LLAMA_MODEL=D:\llama4\gemma-4-e4b-it-q4_k_xl.gguf"
-
-        if defined LLAMA_MODEL (
-            echo [START] !LLAMA_EXE! -m "!LLAMA_MODEL!" --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --reasoning off --reasoning-budget 0
-            start "llama-server" /min "!LLAMA_EXE!" -m "!LLAMA_MODEL!" --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --reasoning off --reasoning-budget 0
-            echo [OK] llama-server started. Waiting for model to load ^(15s^)...
-            timeout /t 15 /nobreak >nul
-            echo [OK] Ready.
-        ) else (
-            :: No model found — try -hf (HuggingFace auto-download)
-            echo [START] !LLAMA_EXE! -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
-            start "llama-server" /min "!LLAMA_EXE!" -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
-            echo [OK] llama-server started. Waiting for model to load ^(15s^)...
-            timeout /t 15 /nobreak >nul
-            echo [OK] Ready.
-        )
+    if exist "D:\llama4\llama-server.exe" (
+        start "llama-server" /min "D:\llama4\llama-server.exe" -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+        echo [OK] llama-server process started in background window.
+        echo        Waiting for it to load the model ^(may take 10-30 seconds^)...
+        timeout /t 15 /nobreak >nul
+        echo [OK] Wait complete. Proceeding with daemon startup.
     ) else (
         color 0E
-        echo [WARNING] llama-server.exe not found.
-        echo   Run setup.bat to install it, or set path in config.llama4.toml
-        echo   LLM cleanup disabled — daemon will use raw transcript.
+        echo [WARNING] D:\llama4\llama-server.exe not found.
+        echo   LLM cleanup will fail — daemon falls back to raw transcript.
+        echo   To enable LLM cleanup, install llama.cpp and set the path in config.llama4.toml
         echo.
         color 0A
     )
 )
 
 :: -----------------------------------------------------------------------
-:: 6. Start the daemon
+:: 6. Start the WhisperFlow daemon
 :: -----------------------------------------------------------------------
 echo.
 echo =======================================================================
@@ -136,9 +152,9 @@ echo.
 echo   Backend:  whisper.cpp (small.en) + LLM cleanup (gemma-4)
 echo   Config:   config.llama4.toml
 echo.
-echo   Dictation:  Ctrl+Shift+Space  (hold to record)
-echo   Transform:  Ctrl+Shift+T      (select text + speak)
-echo   Quit:       right-click tray icon -^> Quit
+echo   Dictation hotkey:  Ctrl+Shift+Space  (hold to record)
+echo   Command hotkey:    Ctrl+Shift+T      (select text, hold + speak)
+echo   Quit:              right-click tray icon -^> Quit
 echo =======================================================================
 echo.
 
