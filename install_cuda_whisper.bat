@@ -118,13 +118,13 @@ echo.
 :: Find the whisper-cli.exe in the extracted files
 :: -----------------------------------------------------------------------
 set "WHISPER_EXE="
-for /r "!EXTRACT_DIR!" %%f in (whisper-cli.exe) do (
+for /f "delims=" %%f in ('dir /s /b "!EXTRACT_DIR!\whisper-cli.exe" 2^>nul') do (
     if not defined WHISPER_EXE set "WHISPER_EXE=%%f"
 )
 
 if not defined WHISPER_EXE (
     :: Try alternative name (older versions use whisper.exe)
-    for /r "!EXTRACT_DIR!" %%f in (whisper.exe) do (
+    for /f "delims=" %%f in ('dir /s /b "!EXTRACT_DIR!\whisper.exe" 2^>nul') do (
         if not defined WHISPER_EXE set "WHISPER_EXE=%%f"
     )
 )
@@ -180,7 +180,7 @@ echo.
 :: Also copy any required DLLs from the extraction
 :: -----------------------------------------------------------------------
 echo Copying required DLLs...
-for /r "!EXTRACT_DIR!" %%f in (*.dll) do (
+for /f "delims=" %%f in ('dir /s /b "!EXTRACT_DIR!\*.dll" 2^>nul') do (
     copy /Y "%%f" "!TARGET_DIR!\" >nul 2>&1
     echo   Copied: %%~nxf
 )
