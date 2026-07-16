@@ -72,34 +72,49 @@ correct and stable. A single-llama.cpp pipeline would only be preferable for
 ## Component responsibilities
 
 ```
-┌─────────────┐    subprocess     ┌──────────────────┐
-│ audio.py    │  (whisper-cli)    │ whisper_cpp.py   │  STT backend
-│  normalize  │ ────────────────► │  -oj JSON parse  │  (TranscriptionBackend)
-│  mic capture│                   │  segments+ts     │
-│  chunking   │                   └────────┬─────────┘
-└──────┬──────┘                            │ TranscriptionResult
-       │ WAV path                           ▼
-       │                          ┌──────────────────┐
-       └─────────────────────────►│ pipeline.py      │
-                                  │  merge chunks    │
-                                  │  format outputs  │
-                                  └────────┬─────────┘
-                                           │ transcript text
-                                           ▼
-                                  ┌──────────────────┐    HTTP
-                                  │ prompts.py       │ ───────► ┌──────────────┐
-                                  │  mode templates  │          │ llama_cpp.py │ LLM backend
-                                  │  summarize/...   │ ◄─────── │  /v1/chat/   │ (LLMBackend)
-                                  └──────────────────┘   JSON   │   completions│
-                                                                  └──────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Wispr Flow OS Layer                                │
+│                                                                             │
+│  ┌──────────────────┐    triggers     ┌──────────────────┐                  │
+│  │ hotkeys.py       │ ──────────────► │ daemon.py        │  Global Hotkey & │
+│  │  Ctrl+Shift+Spc  │                 │  Orchestrator    │  Tray Service    │
+│  └──────────────────┘                 └────────┬─────────┘                  │
+│           ▲                                    │                            │
+│           │ updates & audio chimes             ▼                            │
+│  ┌──────────────────┐                 ┌──────────────────┐                  │
+│  │ overlay.py       │ ◄────────────── │ intents.py       │  Intent Router & │
+│  │  Capsule HUD     │                 │  Mind Reader     │  UI Overlay      │
+│  └──────────────────┘                 └────────┬─────────┘                  │
+└────────────────────────────────────────────────┼────────────────────────────┘
+                                                 │ audio / text
+                                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Pipeline & STT/LLM Engines                         │
+│                                                                             │
+│  ┌──────────────────┐    subprocess / ONNX / HTTP                           │
+│  │ audio.py         │ ────────────────► ┌────────────────────────────────┐  │
+│  │  capture / VAD   │                   │ TranscriptionBackend (ABCs)    │  │
+│  └──────┬───────────┘                   │  ├─ WhisperCppBackend (CUDA)   │  │
+│         │ WAV path                      │  ├─ MoonshineBackend (ONNX)    │  │
+│         ▼                               │  └─ Qwen3AsrBackend            │  │
+│  ┌──────────────────┐                   └────────────────┬───────────────┘  │
+│  │ pipeline.py      │                                    │ result / text    │
+│  │  format / clean  │ ◄──────────────────────────────────┘                  │
+│  └──────┬───────────┘                                                       │
+│         │ text                                                              │
+│         ▼                                                                   │
+│  ┌──────────────────┐    HTTP           ┌────────────────────────────────┐  │
+│  │ prompts.py       │ ────────────────► │ LlamaCppBackend (/v1/chat/...) │  │
+│  │  formatting      │                   └────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **`backends/base.py`** defines `TranscriptionBackend` and `LLMBackend` ABCs.
-  Swap either by implementing the ABC — the pipeline never imports a concrete
-  backend type directly.
-- **`audio.py`** is backend-agnostic: it only produces normalized WAV paths.
-- **`pipeline.py`** depends only on the ABCs and `audio.py`.
-- **`cli.py` / `server.py`** depend only on `pipeline.py` + `config.py`.
+  Swap any STT engine (`whisper_cpp`, `moonshine`, `qwen3_asr`) cleanly via configuration without altering pipeline logic.
+- **`overlay.py`** delivers an Apple-style rounded capsule HUD using Win32 `-transparentcolor` layered windows, asynchronous scheduled callbacks (`root.after`), and `ctypes` high-DPI scaling.
+- **`daemon.py` & `intents.py`** orchestrate background recording, window detection, acoustic prompt biasing (`-p`), and intelligent intent routing (dictation vs command mode).
+- **`inserter.py`** safely injects text directly at the active cursor across any OS window using Win32 simulated input (`SendInput`) and clipboard preservation.
+- **`audio.py` & `pipeline.py`** handle high-accuracy audio normalization, VAD silence trimming, rule-based formatting (`formatting.py`), and optional LLM refinement (`llama_cpp.py`).
 
 ## Why subprocess + HTTP (not Python bindings)?
 

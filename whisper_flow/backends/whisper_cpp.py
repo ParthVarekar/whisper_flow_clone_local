@@ -5,7 +5,7 @@ Wraps the official `whisper-cli` binary via subprocess. Produces JSON output
 internally (30s windows); pre-chunking is done by the audio module if enabled.
 
 Progress feedback mirrors whisper.cpp's own model (confirmed from upstream,
-see RESEARCH.md Task ID 3):
+see ARCHITECTURE.md):
   * stderr line  -> `whisper_print_progress_callback: progress = %3d%%`
                    (fired every `progress_step` (=5) percent when `-pp` is passed)
   * stdout line  -> `[HH:MM:SS.mmm --> HH:MM:SS.mmm]  <text>`
@@ -18,7 +18,7 @@ We stream both pipes line-by-line and forward parsed events to optional
 `on_progress` / `on_segment` callbacks (used by the GUI notifier). The final
 authoritative result still comes from the `-oj` JSON file.
 
-Verified against whisper.cpp v1.9.x (ggml-org/whisper.cpp). See RESEARCH.md.
+Verified against whisper.cpp v1.9.x (ggml-org/whisper.cpp). See ARCHITECTURE.md.
 """
 
 from __future__ import annotations

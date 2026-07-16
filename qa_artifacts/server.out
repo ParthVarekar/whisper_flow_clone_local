@@ -1,5 +1,0 @@
-whisper-flow HTTP server listening on http://127.0.0.1:8091
-  POST /transcribe        (multipart 'audio')
-  POST /process           (multipart 'audio', form 'mode')
-  POST /transcribe/text   (JSON {text, mode})
-  GET  /health

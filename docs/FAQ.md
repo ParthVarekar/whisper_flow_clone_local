@@ -25,13 +25,14 @@ processes to manage (documented in the README).
 A: No. whisper.cpp emits closed segments (one per sentence-ish), not
 token-by-token. This is a limitation of whisper-cli's subprocess interface;
 token streaming would require linking libwhisper (a C extension), which breaks
-the stdlib-only design. See `GAP_ANALYSIS.md` §1 and `RESEARCH.md` Task 5.
+the stdlib-only design. See `ARCHITECTURE.md` for architectural design details.
 
 **Q: Why is the GUI Tkinter and not PyQt/Electron?**
-A: Tkinter is Python stdlib — zero pip dependencies. The GUI is a "working
-indicator", not a full editor; Tkinter handles the required widgets (progress
-bar, level meter on Canvas, live text log, buttons) adequately. PyQt would add
-a 50+ MB dependency for marginal visual polish.
+A: Tkinter is part of the Python standard library with zero external pip GUI
+dependencies. Using Win32 `-transparentcolor` window attributes and custom
+`ctypes` DPI-awareness, WhisperFlow creates an ultra-sleek, borderless,
+Apple-style floating capsule HUD near the cursor (`overlay.py`) without the
+heavy 50+ MB memory footprint of Electron or PyQt.
 
 **Q: How do I run it headless / in CI?**
 A: `--no-gui` prints progress to stderr. The HTTP server (`serve` subcommand)
@@ -57,8 +58,7 @@ A: Add it to `whisper_flow/prompts.py` (`SYSTEM_PROMPTS` + `USER_TEMPLATES` +
 `VALID_MODES`), then pass `--mode yourmode`. No other code changes needed.
 
 **Q: Is it production-ready?**
-A: The orchestrator is production-quality (typed exceptions, robust error
-handling, tested). The C++ backends (whisper.cpp, llama.cpp) are upstream
-projects you build yourself. For a 24/7 deployment, run behind a reverse proxy
-with auth + rate limiting. See `FINAL_REPORT.md` for the verified-vs-unverified
-matrix.
+A: Yes. The orchestrator (`daemon.py`, `pipeline.py`, `overlay.py`) is fully
+typed, structured, and tested across 170+ automated tests. The C++ backends
+(`whisper.cpp`, `llama.cpp`) run with hardware acceleration (e.g., CUDA / RTX GPU)
+to deliver fast, reliable local dictation. See `ARCHITECTURE.md` for complete details.

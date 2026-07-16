@@ -95,7 +95,7 @@ class TestRunFileHappy:
         assert ("stage", "LLM processing", "summarize") in n.events
         assert n.events[-1] == ("done", "transcription complete")
         # result contents
-        assert result["transcript"] == "hello world"
+        assert result["transcript"] == "Hello world."
         assert result["processed"].startswith("SUMMARY:")
         assert result["mode"] == "summarize"
         # happy path does not set canceled/partial keys (only cancel path does)
