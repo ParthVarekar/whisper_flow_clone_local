@@ -271,7 +271,7 @@ class OverlayNotifier:
             fg="#e2e8f0",
             bg=bg_color,
             font=("Segoe UI", 10),
-            wraplength=520,
+            wraplength=496,
             justify=tk.LEFT,
             anchor="nw",
         )
@@ -310,23 +310,20 @@ class OverlayNotifier:
             canvas.create_line(x1, y0 + r, x1, y1 - r, fill=border_color, width=1.5, tags="bg_shape")
 
         # Dynamic resizing of capsule
-        def _resize_for_content(text: str):
+        def _resize_for_content():
+            try:
+                root.update_idletasks()
+            except Exception:  # noqa: BLE001
+                pass
+            
+            h_req = inner_frame.winfo_reqheight()
+            w = 560
+            h = h_req + 28  # Add padding for margins and borders
+            
             screen_h = root.winfo_screenheight()
             max_h = screen_h // 2
+            h = min(max_h, max(110, h))
             
-            if not text:
-                w, h = 560, 110
-            else:
-                wrap = 520
-                chars_per_line = wrap // 8
-                lines = 0
-                for line in text.split("\n"):
-                    line_len = max(1, len(line))
-                    lines += max(1, (line_len + chars_per_line - 1) // chars_per_line)
-                lines = max(1, lines)
-                w = 560
-                h = min(max_h, max(110, 60 + lines * 20))
-
             sw = root.winfo_screenwidth()
             x = (sw - w) // 2
             y = screen_h - h - 70
@@ -358,7 +355,7 @@ class OverlayNotifier:
         canvas.bind("<Button-1>", start_drag)
         canvas.bind("<B1-Motion>", drag)
 
-        _resize_for_content("")
+        _resize_for_content()
 
         # Animation states
         phase = ["idle"]
@@ -465,13 +462,13 @@ class OverlayNotifier:
                 if index + chunk_size < len(words):
                     partial += " ▌"
                 content_var.set(f'"{partial}"')
-                _resize_for_content(partial)
+                _resize_for_content()
 
                 if index + chunk_size < len(words):
                     typewriter_task[0] = root.after(40, reveal_chunk, index + chunk_size)
                 else:
                     content_var.set(f'"{text}"')
-                    _resize_for_content(text)
+                    _resize_for_content()
                     typewriter_task[0] = None
                     
                     # Schedule non-blocking auto-hide
@@ -490,15 +487,25 @@ class OverlayNotifier:
                         msg_type, data = self._q.get_nowait()
                         if msg_type == _MSG_SHOW:
                             _cancel_scheduled_tasks()
-                            status_var.set(str(data) or "Listening...")
-                            status_lbl.configure(fg="#38bdf8")
+                            status_str = str(data) or "Listening..."
+                            status_var.set(status_str)
                             content_var.set("")
-                            phase[0] = "recording"
-                            border_color_var[0] = "#38bdf8"
-                            dot.delete("all")
-                            dot_id = dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
-                            self._play_sound("start")
-                            _resize_for_content("")
+                            
+                            # Adapt UI phase based on status context
+                            if "polishing" in status_str.lower() or "transcribed" in status_str.lower():
+                                phase[0] = "processing"
+                                status_lbl.configure(fg="#c084fc")
+                                border_color_var[0] = "#a855f7"
+                            else:
+                                phase[0] = "recording"
+                                status_lbl.configure(fg="#38bdf8")
+                                border_color_var[0] = "#38bdf8"
+                                dot.delete("all")
+                                dot_id = dot.create_oval(2, 2, 12, 12, fill="#ef4444", outline="")
+                                
+                            if status_str.startswith("Listening"):
+                                self._play_sound("start")
+                            _resize_for_content()
                             root.deiconify()
                             if sys.platform == "win32":
                                 try:
@@ -514,18 +521,20 @@ class OverlayNotifier:
                             root.withdraw()
                             meter_level[0] = 0.0
                             content_var.set("")
-                            _resize_for_content("")
+                            _resize_for_content()
                         elif msg_type == _MSG_PREVIEW:
                             if phase[0] == "recording":
                                 content_var.set(f"🎙️ \"{data}\"")
-                                _resize_for_content(str(data))
+                            else:
+                                content_var.set(f"\"{data}\"")
+                            _resize_for_content()
                         elif msg_type == _MSG_STATUS:
                             status_var.set(str(data))
                             if str(data).startswith("Error:"):
                                 self._play_sound("error")
                                 border_color_var[0] = "#ef4444"
                                 status_lbl.configure(fg="#ef4444")
-                                _resize_for_content(content_var.get())
+                                _resize_for_content()
                         elif msg_type == _MSG_PROCESSING:
                             _cancel_scheduled_tasks()
                             status_var.set(str(data) or "Processing...")
@@ -534,7 +543,8 @@ class OverlayNotifier:
                             phase[0] = "pop"
                             self._play_sound("processing")
                             pop_time[0] = time.monotonic()
-                            _resize_for_content("")
+                            content_var.set("")
+                            _resize_for_content()
                         elif msg_type == _MSG_RESULT:
                             _cancel_scheduled_tasks()
                             status_var.set("✨ Post-processed Output")
