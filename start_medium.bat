@@ -6,7 +6,7 @@ cd /d "%~dp0"
 cls
 echo =======================================================================
 echo               WHISPER FLOW - MEDIUM.EN TEST LAUNCHER
-echo            whisper.cpp (medium.en) + LLM cleanup (gemma-4)
+echo            whisper.cpp (medium.en) + LLM cleanup (gemma-4 E2B)
 echo =======================================================================
 echo.
 
@@ -119,7 +119,7 @@ if !ERRORLEVEL! EQU 0 (
 ) else (
     echo [STARTING] llama-server not running. Launching it now...
     if exist "D:\llama4\llama-server.exe" (
-        start "llama-server" /min "D:\llama4\llama-server.exe" -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+        start "llama-server" /min "D:\llama4\llama-server.exe" -hf unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e2b-it --reasoning off --reasoning-budget 0
         echo [OK] llama-server process started in background window.
         echo        Waiting for it to load the model ^(may take 10-30 seconds^)...
         timeout /t 15 /nobreak >nul
@@ -140,7 +140,7 @@ echo.
 echo =======================================================================
 echo   Starting WhisperFlow Daemon ^(MEDIUM.EN TEST^)...
 echo.
-echo   Backend:  whisper.cpp ^(medium.en, 769M^) + LLM cleanup ^(gemma-4^)
+echo   Backend:  whisper.cpp ^(medium.en, 769M^) + LLM cleanup ^(gemma-4 E2B^)
 echo   Config:   config.medium.toml
 echo.
 echo   Dictation hotkey:  Ctrl+Shift+Space  (hold to record)
