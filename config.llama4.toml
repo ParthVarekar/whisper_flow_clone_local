@@ -1,8 +1,8 @@
-# WhisperFlow configuration — whisper.cpp small.en + gemma-4 LLM cleanup
+# WhisperFlow configuration — whisper.cpp small.en + gemma-4 E2B LLM cleanup
 #
 # ARCHITECTURE (speed optimization, July 2026):
 #   ASR backend  = whisper.cpp small.en (244M, ~1.5s for 30s audio)
-#   LLM cleanup  = gemma-4 E4B via llama-server (auto-started by start.bat)
+#   LLM cleanup  = gemma-4 E2B via llama-server (auto-started by start.bat)
 #   Target       = <5s total (ASR + LLM + formatting)
 #
 # WHY small.en INSTEAD OF Qwen3-ASR?
@@ -21,7 +21,7 @@
 #   Change backend to "qwen3_asr" and uncomment the qwen3_asr lines
 #
 # Start the LLM server with (auto-started by start.bat):
-# D:\llama4\llama-server.exe -hf unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e4b-it --reasoning off --reasoning-budget 0
+# D:\llama4\llama-server.exe -hf unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL --host 127.0.0.1 --port 8081 --ctx-size 32768 --n-gpu-layers 999 --parallel 2 --alias gemma-4-e2b-it --reasoning off --reasoning-budget 0
 
 mode = "auto"
 verbose = false
@@ -62,7 +62,7 @@ stream_max_s = 12
 mode = "server"
 llama_server_bin = 'D:\llama4\llama-server.exe'
 llama_cli_bin = 'D:\llama4\llama-cli.exe'
-model = 'C:\Users\Parth\.cache\huggingface\hub\models--unsloth--gemma-4-E4B-it-GGUF\snapshots\e1d90e5fb9f61d8dc71ef016580784a054e5c787\gemma-4-E4B-it-UD-Q4_K_XL.gguf'
+model = 'C:\Users\Parth\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-GGUF\snapshots\...\gemma-4-E2B-it-UD-Q4_K_XL.gguf'
 host = "127.0.0.1"
 port = 8081
 n_ctx = 2048
