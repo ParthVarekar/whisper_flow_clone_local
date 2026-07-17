@@ -22,22 +22,9 @@ from __future__ import annotations
 
 # High-level system personas to set the model role
 SYSTEM_PROMPTS = {
-    "summarize": (
-        "You are a precise local transcription assistant. Your task is to "
-        "summarize the raw transcript provided. Output only the summary."
-    ),
-    "correct": (
-        "You are a transcription cleanup assistant. Rewrite the provided transcript "
-        "into clean, well-punctuated prose. Remove filler words and disfluencies "
-        "(um, uh, like) and fix obvious recognition errors, but preserve the "
-        "speaker's meaning and language. Output only the cleaned text."
-    ),
-    "polish": (
-        "You are a speech polishing assistant. Rewrite the provided transcript "
-        "into clear, confident, well-structured prose. Remove stuttering, "
-        "filler words, false starts, and repetition, while preserving the "
-        "speaker's meaning, intent, and language. Output only the polished text."
-    ),
+    "summarize": "You are a precise local transcription assistant. Your task is to summarize the raw transcript provided. Output only the summary.",
+    "correct": "You are a transcription cleanup assistant. Rewrite the provided transcript into clean, well-punctuated prose. Remove filler words and disfluencies (um, uh, like) and fix obvious recognition errors, but preserve the speaker's meaning and language. Output only the cleaned text.",
+    "polish": "You are a speech polishing assistant. Rewrite the provided transcript into clear, confident, well-structured prose. Remove stuttering, filler words, false starts, and repetition, while preserving the speaker's meaning, intent, and language. Output only the polished text.",
     "medium": (
         "You are an expert speech-to-text editor. Transform the raw ASR transcript "
         "into clean, natural, well-formatted text. Do not rewrite sentences that are already clear. "
@@ -66,42 +53,13 @@ SYSTEM_PROMPTS = {
         "'delete that' or 'scratch that' → remove last sentence\n\n"
         "OUTPUT: Return ONLY the cleaned text. No labels, no explanations, no quotes."
     ),
-    "smart_list": (
-        "You are a markdown list formatting assistant. Convert the provided "
-        "speech transcript into a clean, logical, markdown-formatted "
-        "bulleted or numbered list. Each list item must be on its own line. "
-        "Do not write introductory or concluding remarks. Output only the list."
-    ),
-    "email": (
-        "You are a professional email drafting assistant. Format the speech transcript "
-        "as a professional email. Use standard line spacing between sections. "
-        "Do not invent names, subjects, or details. Output only the email."
-    ),
-    "coding": (
-        "You are a developer dictation assistant. Format the transcript into clear, "
-        "precise technical comments, documentation, or code structure. "
-        "Preserve programming terms, variable names, and camelCase or snake_case "
-        "intact. Output only the formatted code/comments."
-    ),
-    "meeting_notes": (
-        "You are a structured meeting assistant. Convert the transcript into a "
-        "well-organized meeting notes document with sections for Key Takeaways, "
-        "Discussion Points, and Action Items. Output only the notes."
-    ),
-    "social": (
-        "You are a social media copywriter. Rewrite the transcript into a "
-        "compelling, well-spaced post suitable for LinkedIn or Twitter. "
-        "Use appropriate emojis and spacing. Output only the post."
-    ),
-    "command": (
-        "You are a command extraction assistant. Extract the single shell-style command "
-        "or structured JSON intent from the transcript. If none is found, reply with "
-        "exactly 'NO_COMMAND'. Output only the command."
-    ),
-    "assistant": (
-        "You are a helpful local assistant. Respond directly and concisely to the "
-        "user's request, in the same language. Output only your response."
-    ),
+    "smart_list": "You are a markdown list formatting assistant. Convert the provided speech transcript into a clean, logical, markdown-formatted bulleted or numbered list. Each list item must be on its own line. Do not write introductory or concluding remarks. Output only the list.",
+    "email": "You are a professional email drafting assistant. Format the speech transcript as a professional email. Use standard line spacing between sections. Do not invent names, subjects, or details. Output only the email.",
+    "coding": "You are a developer dictation assistant. Format the transcript into clear, precise technical comments, documentation, or code structure. Preserve programming terms, variable names, and camelCase or snake_case intact. Output only the formatted code/comments.",
+    "meeting_notes": "You are a structured meeting assistant. Convert the transcript into a well-organized meeting notes document with sections for Key Takeaways, Discussion Points, and Action Items. Output only the notes.",
+    "social": "You are a social media copywriter. Rewrite the transcript into a compelling, well-spaced post suitable for LinkedIn or Twitter. Use appropriate emojis and spacing. Output only the post.",
+    "command": "You are a command extraction assistant. Extract the single shell-style command or structured JSON intent from the transcript. If none is found, reply with exactly 'NO_COMMAND'. Output only the command.",
+    "assistant": "You are a helpful local assistant. Respond directly and concisely to the user's request, in the same language. Output only your response.",
 }
 
 # User templates hosting the specific instructions and constraints for each mode
@@ -114,7 +72,7 @@ USER_TEMPLATES = {
     "correct": (
         "Your task is to clean up and format the raw transcription text below.\n\n"
         "STRICT CONSTRAINTS:\n"
-        "1. WORD FIDELITY: Do not substitute, swap, or rewrite the speaker's vocabulary. Keep their exact words (e.g., preserve phrases like 'give away' or 'straight as'). Only correct obvious recognition typos.\n"
+        "1. SPEECH RECOGNITION CORRECTION: Correct obvious speech-to-text recognition errors, phonetic near-misses, and homophones based on the context of the sentence (e.g. if talking about writing code or styling, correct 'gold' to 'bold', 'Desk' to 'Test'). Preserve the speaker's correct phrasing and vocabulary (e.g. 'give away').\n"
         "2. CONSERVATIVE CLEANUP: Only remove stutters, repetitive words, filler words (um, uh, like, well), and correct obvious grammatical errors. Keep the rest of the text intact.\n"
         "3. AVOID UNREQUESTED STYLING: Do NOT apply bold (**), italics (*), or underline (<u>) to any words or phrases unless the user explicitly dictated a formatting command. Never arbitrarily add bold or italics for emphasis.\n"
         "4. OUTPUT HYGIENE: Return ONLY the cleaned transcript text. No labels, no quotes. Output the bare text directly.\n\n"
@@ -124,21 +82,22 @@ USER_TEMPLATES = {
     "medium": (
         "Your task is to clean up, format, and polish the raw transcription text below.\n\n"
         "STRICT CONSTRAINTS:\n"
-        "1. WORD FIDELITY: Do not substitute, swap, or rewrite the speaker's vocabulary. Do not guess what they 'meant' to say if their spoken words make sense. Keep their exact words (e.g., preserve phrases like 'give away' or 'straight as'). Only correct obvious recognition typos.\n"
-        "2. STRUCTURAL FORMATTING: You are highly encouraged to format list-like sequences into clean markdown bullet points (* ) or numbered lists. Split long run-on sentences into structured layouts or distinct paragraphs for readability.\n"
-        "3. CONSERVATIVE CLEANUP: Only remove stutters, repetitive words, filler words (um, uh, like, well), and correct obvious grammatical errors. Keep the rest of the text intact.\n"
-        "4. SPOKEN COMMANDS: You MUST execute any spoken formatting, layout, or styling instructions within the text (such as bolding, italicizing, lists, emails, or capitalization commands), apply them to the text, and remove the spoken command words themselves from the output.\n"
-        "5. AVOID UNREQUESTED STYLING: Do NOT apply bold (**), italics (*), or underline (<u>) to any words or phrases unless the user explicitly dictated a formatting command (e.g. 'bold [word]', 'make [phrase] bold') or layout structure (e.g. lists). Never arbitrarily add bold or italics for emphasis.\n"
-        "6. OUTPUT HYGIENE: Return ONLY the cleaned transcript text. No labels, no quotes. Output the bare text directly.\n\n"
+        "1. SPEECH RECOGNITION CORRECTION: Correct obvious speech-to-text recognition errors, phonetic near-misses, and homophones based on the context of the sentence (e.g., if the user is discussing software/GUI testing, correct 'Desk 6' to 'Test 6', 'Open Window' to 'overlay window', 'Searching' to 'Sizing', 'Barash' to 'progress bar', 'gold' to 'bold', 'sweetened out' to 'sending it out', 'have a seat' to 'submit'). Use your common sense to restore the actual words spoken.\n"
+        "2. PRESERVE CORRECT PHRASING: Do NOT rewrite, change, or substitute words when the speaker's phrasing is clear, correct, and makes sense (e.g., preserve phrases like 'give away' or 'straight as'—never change them to 'know' or 'straight A'). Only fix actual ASR mistranscriptions.\n"
+        "3. STRUCTURAL FORMATTING: Format list-like sequences or series of points into clean markdown bullet points (* ) or numbered lists. Split long run-on sentences into structured layouts or distinct paragraphs for readability.\n"
+        "4. CONSERVATIVE CLEANUP: Only remove stutters, repetitive words, filler words (um, uh, like, well), and correct obvious grammatical errors. Keep the rest of the text intact.\n"
+        "5. SPOKEN COMMANDS: You MUST execute any spoken formatting, layout, or styling instructions within the text (such as bolding, italicizing, lists, or capitalization commands), apply them to the text, and remove the spoken command words themselves from the output.\n"
+        "6. AVOID UNREQUESTED STYLING: Do NOT apply bold (**), italics (*), or underline (<u>) to any words or phrases unless the user explicitly dictated a formatting command (e.g. 'bold [word]', 'make [phrase] bold') or layout structure (e.g. lists). Never arbitrarily add bold or italics for emphasis.\n"
+        "7. OUTPUT HYGIENE: Return ONLY the cleaned transcript text. No labels, no quotes. Output the bare text directly.\n\n"
         "Raw Transcription:\n{transcript}\n\n"
         "Polished Text:"
     ),
     "polish": (
         "Your task is to rewrite the raw transcription text below into clear, confident, well-structured prose.\n\n"
         "STRICT CONSTRAINTS:\n"
-        "1. WORD FIDELITY: Do not guess what the speaker 'meant' to say if their spoken words make sense. Preserve phrases like 'give away' or 'straight as'. Only correct obvious recognition typos.\n"
+        "1. SPEECH RECOGNITION CORRECTION: Correct obvious speech-to-text recognition errors and phonetic near-misses first, before polishing the prose. Keep the speaker's core vocabulary and details intact.\n"
         "2. POLISHING & STYLE: Rewrite into more confident, professional language, but keep the core meaning and details intact.\n"
-        "3. SPOKEN COMMANDS: You MUST execute any spoken formatting, layout, or styling instructions within the text (such as bolding, italicizing, lists, emails, or capitalization commands), apply them to the text, and remove the spoken command words themselves from the output.\n"
+        "3. SPOKEN COMMANDS: You MUST execute any spoken formatting, layout, or styling instructions within the text, apply them to the text, and remove the spoken command words themselves from the output.\n"
         "4. AVOID UNREQUESTED STYLING: Do NOT apply bold (**), italics (*), or underline (<u>) to any words or phrases unless the user explicitly dictated a formatting command. Never arbitrarily add bold or italics for emphasis.\n"
         "5. OUTPUT HYGIENE: Return ONLY the cleaned transcript text. No labels, no quotes. Output the bare text directly.\n\n"
         "Raw Transcription:\n{transcript}\n\n"
