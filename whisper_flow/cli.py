@@ -312,18 +312,13 @@ def _cmd_check(args: argparse.Namespace) -> int:
         ("LLM model", cfg.llm.model, "GGUF"),
     ]:
         if not path:
-            if label == "LLM model" and cfg.llm.mode == "server":
-                continue
             print(f"  [UNSET ] {label:14s} (not configured)")
             ok = False
         elif not __import__("os").path.isfile(path):
-            if label == "LLM model" and cfg.llm.mode == "server":
-                print(f"  [INFO   ] {label:14s} {path} (managed by llama-server)")
-            else:
-                print(f"  [MISSING] {label:14s} {path}")
-                ok = False
+            print(f"  [MISSING] {label:14s} {path}")
+            ok = False
         else:
-            print(f"  [OK   ]    {label:14s} {path}")
+            print(f"  [OK ]    {label:14s} {path}")
 
     # llama-server reachable?
     if cfg.llm.mode == "server":

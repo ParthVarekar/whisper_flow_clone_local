@@ -24,9 +24,6 @@ def detect_auto_intent(transcript: str, app_category: str = "", app_name: str = 
         "bullet point", "bullet points", "numbered list", "smart list",
         "first of all", "number one,", "number two,", "first,", "second,", "third,",
         "here are the steps", "here are a few", "several reasons:",
-        "list format", "in a list", "format as a list", "format this as a list",
-        "format as a bulleted list", "make a list", "create a list", "bulleted list",
-        "list of", "list a few",
     ]
     if any(kw in lower for kw in list_keywords):
         return "smart_list"

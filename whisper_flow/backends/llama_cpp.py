@@ -10,7 +10,7 @@ Two modes (both go through llama.cpp, both fully local):
     flag names vary slightly across llama.cpp builds, so server mode is
     strongly preferred.
 
-See ARCHITECTURE.md for why this is the correct LLM stage (llama.cpp has no native
+See RESEARCH.md for why this is the correct LLM stage (llama.cpp has no native
 Whisper transcription; it IS the right choice for the text LLM stage).
 """
 

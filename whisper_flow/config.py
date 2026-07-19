@@ -58,7 +58,7 @@ class TranscriptionConfig:
     max_len: int = 0  # 0 = whisper.cpp default (~30s segments)
     # VAD: whisper-cli natively supports Silero VAD via --vad -vm <model>
     # (cli.cpp:1248-1256, added v1.8.5). When vad=True and vad_model is set,
-    # whisper-full runs VAD first and skips silence. See ARCHITECTURE.md.
+    # whisper-full runs VAD first and skips silence. See RESEARCH.md Task 5.
     vad: bool = False
     vad_model: str = ""  # path to ggml-silero-v*.bin (download via download-vad-model.sh)
     vad_threshold: float = 0.5  # -vt; speech probability threshold 0..1
@@ -113,7 +113,7 @@ class AudioConfig:
     # Streaming-mic mode (auto start/stop via VAD). When stream=True, mic capture
     # runs in a rolling buffer and periodically hands audio to whisper-cli with
     # VAD enabled; only new segments are emitted. stream_chunk_s is the poll
-    # interval (seconds of audio per whisper-cli invocation). See ARCHITECTURE.md.
+    # interval (seconds of audio per whisper-cli invocation). See RESEARCH.md §A4.
     stream: bool = False
     stream_chunk_s: int = 5   # how many seconds of audio per transcription pass
     stream_max_s: int = 30    # rolling buffer length (max audio kept)

@@ -59,22 +59,6 @@ _NEWLINE_WORDS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Spoken formatting words
-# ---------------------------------------------------------------------------
-_BLOCK_BOLD = re.compile(r"\b(start bold|bold on)\b(.*?)\b(end bold|bold off)\b", flags=re.IGNORECASE | re.DOTALL)
-_BLOCK_ITALIC = re.compile(r"\b(start italic|start italics|italics on|italic on)\b(.*?)\b(end italic|end italics|italics off|italic off)\b", flags=re.IGNORECASE | re.DOTALL)
-_BLOCK_UNDERLINE = re.compile(r"\b(start underline|underline on)\b(.*?)\b(end underline|underline off)\b", flags=re.IGNORECASE | re.DOTALL)
-
-_WORD_BOLD = re.compile(r"\bbold\s+word\s+(\w+)\b", flags=re.IGNORECASE)
-_WORD_ITALIC = re.compile(r"\b(italic|italicize)\s+word\s+(\w+)\b", flags=re.IGNORECASE)
-_WORD_UNDERLINE = re.compile(r"\bunderline\s+word\s+(\w+)\b", flags=re.IGNORECASE)
-
-_PHRASE_BOLD = re.compile(r"\bbold\s+phrase\s+(.*?)(?=[,.;:!?\n]|$)", flags=re.IGNORECASE)
-_PHRASE_ITALIC = re.compile(r"\b(italic|italicize)\s+phrase\s+(.*?)(?=[,.;:!?\n]|$)", flags=re.IGNORECASE)
-_PHRASE_UNDERLINE = re.compile(r"\bunderline\s+phrase\s+(.*?)(?=[,.;:!?\n]|$)", flags=re.IGNORECASE)
-
-
-# ---------------------------------------------------------------------------
 # 3. Filler words & disfluencies
 # ---------------------------------------------------------------------------
 _BACKTRACK_MARKERS = (
@@ -286,9 +270,6 @@ def apply_smart_formatting(text: str, *, writing_style: str = "default") -> str:
     out = _apply_itn_currency(out)
     out = _apply_itn_numbers(out)
 
-    # Stage 9.5: spoken formatting tags
-    out = _apply_spoken_formatting(out)
-
     # Stage 10: capitalization
     out = _apply_capitalization(out)
 
@@ -356,41 +337,12 @@ def _apply_backtrack(text: str) -> str:
     # multiple backtrack markers in sequence.
     sentences = re.split(r"([.!?]\s+)", text)
     rebuilt: list[str] = []
-    
     for part in sentences:
         lowered = part.lower()
-        earliest_idx = -1
-        best_marker = ""
-        
-        for marker in _BACKTRACK_MARKERS:
-            start_pos = 0
-            while True:
-                idx = lowered.find(marker, start_pos)
-                if idx == -1:
-                    break
-                
-                # Check word boundaries
-                is_word_start = (idx == 0 or not lowered[idx - 1].isalnum())
-                is_word_end = (idx + len(marker) == len(lowered) or not lowered[idx + len(marker)].isalnum())
-                
-                if is_word_start and is_word_end:
-                    # Check if preceded only by clause/sentence boundary punctuation
-                    pre = part[:idx].rstrip()
-                    is_valid = False
-                    if not pre:
-                        is_valid = True
-                    elif pre[-1] in {",", ";", "—", "-", ".", "!", "?"}:
-                        is_valid = True
-                    
-                    if is_valid:
-                        if earliest_idx == -1 or idx < earliest_idx:
-                            earliest_idx = idx
-                            best_marker = marker
-                            
-                start_pos = idx + 1
-                
-        if earliest_idx != -1:
-            suffix = part[earliest_idx + len(best_marker):].strip(" ,")
+        marker = next((m for m in _BACKTRACK_MARKERS if m in lowered), "")
+        if marker:
+            idx = lowered.find(marker)
+            suffix = part[idx + len(marker):].strip(" ,")
             # Remove ONLY the immediately preceding sentence + its separator.
             # Pop the separator first, then the sentence.
             if rebuilt:
@@ -406,9 +358,7 @@ def _apply_backtrack(text: str) -> str:
             if len(suffix.split()) >= 1:
                 rebuilt.append(suffix)
             continue
-            
         rebuilt.append(part)
-        
     return "".join(rebuilt)
 
 
@@ -649,12 +599,9 @@ def _apply_capitalization(text: str) -> str:
     # touching "i" inside other words or in acronyms like "iOS".
     out = _STANDALONE_I.sub("I", out)
 
-    # Capitalize first letter of the whole text, skipping leading formatting tags/markers (like *, _, <, etc.)
-    out = re.sub(
-        r"^((?:<[^>]+>|[^a-zA-Z])*)([a-z])",
-        lambda m: m.group(1) + m.group(2).upper(),
-        out,
-    )
+    # Capitalize first letter of the whole text
+    if out and out[0].isalpha() and out[0].islower():
+        out = out[0].upper() + out[1:]
 
     # Capitalize first letter after sentence-ending punctuation + whitespace
     # e.g. ". hello" → ". Hello", "! what" → "! What"
@@ -751,25 +698,3 @@ def _ensure_trailing_punct(text: str) -> str:
     if out[-1] in ":,;)\"'":
         return text
     return out + "."
-
-
-def _apply_spoken_formatting(text: str) -> str:
-    """Parse spoken formatting cues like 'bold word', 'bold phrase', 'start bold' -> markdown/HTML."""
-    out = text
-    
-    # 1. Block formatting
-    out = _BLOCK_BOLD.sub(lambda m: f"**{m.group(2).strip()}**", out)
-    out = _BLOCK_ITALIC.sub(lambda m: f"*{m.group(2).strip()}*", out)
-    out = _BLOCK_UNDERLINE.sub(lambda m: f"<u>{m.group(2).strip()}</u>", out)
-    
-    # 2. Word formatting
-    out = _WORD_BOLD.sub(lambda m: f"**{m.group(1).strip()}**", out)
-    out = _WORD_ITALIC.sub(lambda m: f"*{m.group(2).strip()}*", out)
-    out = _WORD_UNDERLINE.sub(lambda m: f"<u>{m.group(1).strip()}</u>", out)
-    
-    # 3. Phrase formatting
-    out = _PHRASE_BOLD.sub(lambda m: f"**{m.group(1).strip()}**", out)
-    out = _PHRASE_ITALIC.sub(lambda m: f"*{m.group(2).strip()}*", out)
-    out = _PHRASE_UNDERLINE.sub(lambda m: f"<u>{m.group(1).strip()}</u>", out)
-    
-    return out

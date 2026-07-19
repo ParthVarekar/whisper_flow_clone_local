@@ -55,7 +55,7 @@ class TranscriptionBackend(ABC):
 
         If `on_progress`/`on_segment` are provided, the backend should call them
         in real time as the subprocess streams output (mirrors whisper.cpp's
-        stderr progress + stdout segment callbacks — see ARCHITECTURE.md).
+        stderr progress + stdout segment callbacks — see RESEARCH.md Task 3).
         """
 
 

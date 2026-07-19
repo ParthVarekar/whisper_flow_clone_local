@@ -1,7 +1,7 @@
 """Tests for whisper.cpp output line parsers (progress + segments).
 
 Regression tests for the exact format strings confirmed from upstream cli.cpp
-(see ARCHITECTURE.md). If whisper.cpp changes its output format, these
+(see RESEARCH.md Task 3). If whisper.cpp changes its output format, these
 tests break and the parsers must be updated.
 """
 from __future__ import annotations
