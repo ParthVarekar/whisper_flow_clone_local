@@ -1,87 +1,136 @@
 <div align="center">
+  <br />
   <h1>🌊 WhisperFlow</h1>
-  <p><b>The ultimate privacy-first, offline voice dictation & AI assistant.</b></p>
-  
-  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-  [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgray.svg)](#)
-  [![100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success.svg)](#)
+  <p><b>Intelligent, zero-latency voice dictation & contextual AI text transformation—100% offline.</b></p>
+
+  [![License: MIT](https://img.shields.io/badge/License-MIT-007ACC.svg)](https://opensource.org/licenses/MIT)
+  [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-blue.svg)](#)
+  [![Architecture: Local Dual Engine](https://img.shields.io/badge/Architecture-Qwen3%20%2B%20Gemma%202B-8A2BE2.svg)](#)
+  [![Privacy: 100% On--Device](https://img.shields.io/badge/Privacy-100%25%20On--Device-success.svg)](#)
+
+  <br />
 </div>
 
 ---
 
-**WhisperFlow** is a blazingly fast, entirely local voice-to-text pipeline that doesn't just transcribe your voice—it understands, formats, and cleans it up using cutting-edge Large Language Models (LLMs). 
+**WhisperFlow** is an open-source, local-first voice productivity engine designed to bridge raw speech recognition with intelligent Large Language Model (LLM) post-processing. 
 
-Unlike cloud-based services, WhisperFlow runs **100% on your machine**. No subscriptions, no internet connection required, and zero data leaves your device. 
+Instead of dumping unformatted speech-to-text transcripts into your application, WhisperFlow captures audio, analyzes intent, removes verbal stutters, executes spoken formatting cues, and pastes polished text directly into any focused window—**with zero cloud dependencies.**
 
-## ✨ Key Features
-
-- 🚀 **Blazingly Fast ASR**: Powered by **Qwen3-ASR**, capturing every nuance of your voice with remarkable accuracy.
-- 🧠 **Smart LLM Post-Processing**: Uses **Gemma 2B (E2B)** to seamlessly correct grammar, fix homophones, and automatically format your text (e.g., turning spoken lists into markdown lists).
-- 🎙️ **Global Hotkeys**: Dictate anywhere, in any application. Hold `Ctrl+Shift+Space` to talk, release to transcribe.
-- 🪄 **Voice Commands**: Select text in any app, hold `Ctrl+Shift+T`, and speak a command (e.g., *"Make this sound more professional"*, *"Translate this to Spanish"*).
-- 🖥️ **Beautiful UI Overlay**: A sleek, non-intrusive floating widget gives you real-time feedback on recording status, audio normalization, and transcription progress.
-- 🔒 **Absolute Privacy**: Zero cloud dependency. No data collection.
-
----
-
-## ⚡ How It Works
-
-WhisperFlow orchestrates a highly optimized two-step pipeline locally:
-
-1. **Speech-to-Text (STT)**: The moment you release the hotkey, the audio is processed by the Qwen3-ASR engine.
-2. **LLM Cleanup**: The raw transcript is passed to a lightweight, highly-capable LLM (Gemma-4 E2B via `llama-server`) which acts as an intelligent editor, applying context-aware corrections and formatting.
-
-## 🛠️ Getting Started (Windows)
-
-We've designed WhisperFlow to be as effortless as possible.
-
-### Prerequisites
-- Windows 10/11
-- Python 3.10+
-- An NVIDIA GPU is recommended for optimal performance.
-
-### One-Click Launch
-
-Everything is bundled in a seamless launcher. Simply double-click:
-
-```text
-start.bat
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│   Audio Input   │ ────> │  Qwen3-ASR STT  │ ────> │ Gemma-4 2B LLM  │ ────> │  Active App    │
+│  (Mic / File)   │       │ (High Accuracy) │       │ (Context Polish)│       │ (Auto-Pasted)   │
+└─────────────────┘       └─────────────────┘       └─────────────────┘       └─────────────────┘
 ```
 
-**What `start.bat` does automatically:**
-- Verifies your Python environment and installs required standard dependencies (`sounddevice`, `pynput`, `pystray`).
-- Checks for the Qwen3-ASR backend and Gemma 2B LLM files.
-- Quietly boots up the `llama-server` in the background for ultra-fast LLM inference.
-- Launches the WhisperFlow daemon and binds your global hotkeys.
+---
 
-A tray icon will appear in your Windows taskbar when the daemon is running. 
+## 💡 Why WhisperFlow?
 
-## 🎮 Usage
+Most speech-to-text utilities output raw, unpunctuated ASR streams filled with filler words (*"um"*, *"uh"*), misrecognized homophones, and run-on sentences. 
 
-### 1. Global Dictation
-Focus any text input field (Notepad, Word, your web browser).
-- **Press and Hold** `Ctrl+Shift+Space`
-- **Speak** naturally. 
-- **Release** the keys.
+WhisperFlow fixes this by decoupling **acoustic decoding** from **semantic editing**:
 
-WhisperFlow will instantly process your speech, clean it up with the LLM, and automatically paste the perfectly formatted text directly into your active window.
-
-### 2. Contextual Voice Commands
-Need to rewrite an email or summarize a paragraph?
-- **Select** the text in your application.
-- **Press and Hold** `Ctrl+Shift+T`
-- **Speak** your instruction (e.g., *"Summarize this in three bullet points"*).
-- **Release**. The selected text will be replaced with the AI-generated result.
-
-## ⚙️ Configuration
-
-WhisperFlow is highly customizable. Edit `config.llama4.toml` to tweak:
-- **Writing Styles**: Choose between casual, formal, or default tones.
-- **Hotkeys**: Rebind the default shortcuts to fit your workflow.
-- **Snippets & Dictionary**: Add custom phonetic rules or auto-expanding text snippets (e.g., mapping `"my email"` to `your.name@example.com`).
+| Feature | Standard Cloud STT APIs | Desktop Voice Apps | WhisperFlow |
+|---|---|---|---|
+| **Privacy Guarantee** | ❌ Audio sent to external servers | ⚠️ Cloud transcription required | **100% On-Device / Offline** |
+| **Subscription Fees** | ❌ Monthly per-minute billing | ❌ $10–$15 / month | **Free & Open Source** |
+| **Contextual Formatting** | ❌ Raw text output only | ⚠️ Basic capitalization | **LLM Structuring (Lists, Bold, Polishing)** |
+| **Contextual Voice Commands** | ❌ Not supported | ⚠️ Limited pre-built rules | **Full AI In-Place Text Editing** |
+| **Custom Dictionary / Snippets** | ⚠️ Expensive custom models | ⚠️ Rigid replacement rules | **Phonetic Vocab + Auto-Expanding Text** |
 
 ---
 
+## ✨ Core Capabilities
+
+### 1. Global Dictation (`Ctrl+Shift+Space`)
+Hold the hotkey, speak naturally, and release. WhisperFlow automatically removes verbal stumbles and formats spoken structures:
+- **Spoken**: *"I will list a few items bold this word that is groceries bananas and milk"*
+- **Output**: 
+  - **Groceries**
+  - Bananas
+  - Milk
+
+### 2. Contextual Voice Commands (`Ctrl+Shift+T`)
+Highlight text in any application (VS Code, Outlook, Slack, Browser), hold `Ctrl+Shift+T`, and speak an instruction:
+- **Selected Text**: `"Hey team, we might delay the release by two days due to some open bugs."`
+- **Spoken Command**: `"Make this sound professional and action-oriented."`
+- **Replaced Result**: `"Team, we are adjusting our release schedule by 48 hours to resolve remaining critical issues."`
+
+### 3. Real-Time UI Overlay
+A lightweight, non-intrusive floating status widget gives immediate feedback during recording, normalization, and LLM processing phases without taking focus away from your work.
+
+---
+
+## 🚀 Quick Start (Windows)
+
+WhisperFlow comes with an automated background service launcher.
+
+### Prerequisites
+- **OS**: Windows 10 or 11 (x64)
+- **Python**: 3.10 or higher
+- **Hardware**: Dedicated NVIDIA GPU recommended for sub-second LLM inference (CPU fallback supported).
+
+### Installation & Launch
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/ParthVarekar/whisper_flow_clone_local.git
+   cd whisper_flow_clone_local
+   ```
+
+2. Run the one-click launcher:
+   ```text
+   start.bat
+   ```
+
+The launcher will automatically verify Python dependencies, start the lightweight background `llama-server` (Gemma 2B), and initialize the WhisperFlow tray icon daemon.
+
+---
+
+## ⚙️ Configuration & Customization
+
+All settings can be customized in `config.llama4.toml`:
+
+```toml
+mode = "auto"
+writing_style = "default"
+smart_formatting = true
+dictation_hotkey = "ctrl+shift+space"
+command_hotkey = "ctrl+shift+t"
+
+# Custom vocabulary & phonetic corrections
+dictionary = [
+  "WhisperFlow", 
+  "whisper.cpp", 
+  "llama.cpp", 
+  "GGUF", 
+  "Qwen3-ASR (kwen three)"
+]
+
+[snippets]
+"my email" = "your.email@domain.com"
+"my signature" = "Best regards,\nYour Name"
+```
+
+---
+
+## 📱 Architecture & Mobile Roadmap
+
+WhisperFlow is built around a decoupled backend architecture (`whisper_flow/backends/base.py`). 
+
+To explore our technical roadmap for expanding WhisperFlow to mobile devices (using zero-battery native OS speech recognition combined with on-device LLM cleanup), see our detailed architecture document:
+- 📄 [Mobile Implementation Plan](docs/MOBILE_IMPLEMENTATION_PLAN.md)
+- 📄 [Architecture Specification](ARCHITECTURE.md)
+
+---
+
+## 📄 License
+
+WhisperFlow is released under the [MIT License](LICENSE). 
+
 <div align="center">
-  <i>Built for those who value speed, accuracy, and absolute privacy.</i>
+  <br />
+  <sub>Built for speed, precision, and privacy.</sub>
 </div>
