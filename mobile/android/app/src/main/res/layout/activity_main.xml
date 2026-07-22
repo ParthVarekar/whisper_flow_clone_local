@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="#121212">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🌊 WhisperFlow Mobile"
+        android:textColor="#FFFFFF"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="100% Offline Dictation & Contextual AI Post-Processing"
+        android:textColor="#AAAAAA"
+        android:textSize="14sp"
+        android:layout_marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/btnEnableKeyboard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="1. Enable WhisperFlow Keyboard"
+        android:background="#007ACC"
+        android:textColor="#FFFFFF"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/btnSelectKeyboard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="2. Select WhisperFlow Input Method"
+        android:background="#2D2D2D"
+        android:textColor="#FFFFFF"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:id="@+id/tvModelStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Local Model Status: Ready (gemma-4-E2B-it-Q4_K_M.gguf)"
+        android:textColor="#4CAF50"
+        android:textSize="13sp" />
+
+</LinearLayout>
