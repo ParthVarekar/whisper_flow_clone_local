@@ -11,20 +11,16 @@ writing_style = "default"
 smart_formatting = true
 dictation_hotkey = "ctrl+shift+space"
 command_hotkey = "ctrl+shift+t"
-dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API", "Qwen3-ASR (kwen three)", "Qwen3 (kwen three)", "Moonshine", "crispasr", "CrispASR"]
+dictionary = ["daemon", "daemon.py", "WhisperFlow", "whisper_flow", "Wispr Flow", "whisper.cpp", "llama.cpp", "GGUF", "Python", "VS Code", "GitHub", "pytest", "API", "Gemma", "Gemma 2", "Gemma 4", "Gemma 4 E2B", "Gemma-4 E2B", "E2B", "E4B", "Qwen3-ASR", "CrispASR"]
 
 [transcription]
-backend = "qwen3_asr"
-# Whisper (legacy, kept for fallback)
+backend = "whisper_cpp"
+# GPU Accelerated whisper.cpp (small.en - sub-2s latency + prompt bias)
 whisper_bin = 'C:\Users\Parth\Desktop\whisper\third_party\whisper.cpp-bin\whisper-bin-x64\Release\whisper-cli.exe'
-model = 'C:\Users\Parth\Desktop\whisper\models\ggml-base.en.bin'
-# Qwen3-ASR (primary STT engine)
-qwen3_asr_bin = 'C:\Users\Parth\Desktop\whisper\third_party\crispasr\crispasr.exe'
-qwen3_asr_model = 'C:\Users\Parth\Desktop\whisper\models\qwen3-asr-1.7b-q4_k.gguf'
-qwen3_asr_mmproj = 'C:\Users\Parth\Desktop\whisper\models\mmproj-Qwen3-ASR-1.7B-Q8_0.gguf'
+model = 'C:\Users\Parth\Desktop\whisper\models\ggml-small.en.bin'
 language = "en"
 threads = 8
-flash_attention = false
+flash_attention = true
 
 [audio]
 mic_backend = "sounddevice"
