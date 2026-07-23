@@ -39,7 +39,8 @@ _PUNCT_WORDS = [
     (r"\bsemicolon\b", ";"),
     (r"\bsemi colon\b", ";"),
     (r"\bcolon\b", ":"),
-    (r"\bdash\b", "—"),
+    (r"\bem dash\b", "—"),
+    (r"\ben dash\b", "—"),
     (r"\bopen quote\b", '"'),
     (r"\bclose quote\b", '"'),
     (r"\bopen paren\b", "("),
@@ -75,27 +76,19 @@ _BACKTRACK_MARKERS = (
 )
 
 _FILLER_PATTERNS = [
-    # Standalone vocal fillers between words
+    # Standalone vocal hesitations/fillers between words
     (r"\b(um|uh|hmm|uhm|erm|ah|uhh|umm|hmm+|uh+|um+)\b[,\s]*", ""),
-    # "like" used as filler (not comparison): "like I was thinking" → "I was thinking"
-    # but keep "like this" or "looks like"
+    # "like" used as filler before capitalized words
     (r"\blike\s+(?=[A-Z])", ""),
-    # "you know" as filler
+    # "you know" as conversational filler
     (r"\byou know[,\s]*", ""),
-    # "I mean" as filler (also handled by backtrack, but catch standalone)
+    # "I mean" as filler
     (r"\bI mean[,\s]+", ""),
     # "sort of" / "kind of" as filler
     (r"\b(sort of|kind of)[,\s]*", ""),
-    # Hedge words as filler anywhere
+    # Conversational hedge words
     (r"\b(basically|literally|honestly|obviously|essentially|frankly)\b[,\s]*", ""),
-    # "I think" / "I guess" / "I suppose" as trailing filler
-    (r",?\s*I think\s*\.?$", "."),
-    (r",?\s*I guess\s*\.?$", "."),
-    (r",?\s*I suppose\s*\.?$", "."),
-    # "anyway" / "anyways" as filler at start or end
-    (r"^\s*anyways?[,\s]+", ""),
-    (r"[,\s]+anyways?\s*\.?$", "."),
-    # "so yeah" / "yeah so" conversational fillers
+    # Conversational fillers "so yeah" / "yeah so"
     (r"\bso yeah[,\s]*", ""),
     (r"\byeah[,\s]+(?=[A-Z])", ""),
     # Double spaces left behind after removal

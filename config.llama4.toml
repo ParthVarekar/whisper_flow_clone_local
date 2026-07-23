@@ -37,9 +37,9 @@ model = 'C:\Users\Parth\.cache\huggingface\hub\models--unsloth--gemma-4-E2B-it-G
 host = "127.0.0.1"
 port = 8081
 n_ctx = 2048
-temperature = 0.3
+temperature = 0.0
 max_tokens = 2048
-top_p = 0.9
+top_p = 1.0
 
 [snippets]
 "my email" = "parth@example.com"
